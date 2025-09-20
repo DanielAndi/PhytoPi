@@ -1,6 +1,6 @@
 -- Create ml_inferences table
 CREATE TABLE ml_inferences (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     result JSONB NOT NULL, -- ML model output (predictions, classifications, etc.)

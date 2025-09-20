@@ -1,9 +1,9 @@
 -- Enable necessary extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- Create devices table
 CREATE TABLE devices (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     type VARCHAR(100) NOT NULL, -- e.g., 'phyto_pi', 'sensor_hub', 'camera_module'
     location VARCHAR(255), -- e.g., 'greenhouse_a', 'lab_room_1'
@@ -15,7 +15,7 @@ CREATE TABLE devices (
 
 -- Create sensors table
 CREATE TABLE sensors (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
     type VARCHAR(100) NOT NULL, -- e.g., 'temperature', 'humidity', 'light', 'soil_moisture', 'ph'
     calibration_data JSONB, -- Store calibration coefficients, offsets, etc.
@@ -25,7 +25,7 @@ CREATE TABLE sensors (
 
 -- Create users table
 CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) UNIQUE NOT NULL,
     role VARCHAR(50) DEFAULT 'user', -- 'admin', 'researcher', 'user'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

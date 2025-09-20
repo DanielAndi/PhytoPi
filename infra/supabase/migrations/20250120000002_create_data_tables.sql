@@ -1,6 +1,6 @@
 -- Create readings table
 CREATE TABLE readings (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     sensor_id UUID NOT NULL REFERENCES sensors(id) ON DELETE CASCADE,
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     value DECIMAL(10,4) NOT NULL, -- Supports high precision sensor readings
@@ -11,7 +11,7 @@ CREATE TABLE readings (
 
 -- Create alerts table
 CREATE TABLE alerts (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
     sensor_id UUID REFERENCES sensors(id) ON DELETE SET NULL, -- Can be null for device-level alerts
     type VARCHAR(100) NOT NULL, -- e.g., 'threshold_exceeded', 'device_offline', 'calibration_needed'
