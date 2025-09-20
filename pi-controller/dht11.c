@@ -14,7 +14,7 @@
 #include <time.h>
 #include <pigpio.h>
 
-#define DHT_PIN 4          // BCM numbering: GPIO4 (physical pin 7). Change if needed.
+#define DHT_PIN 7          // BCM numbering: GPIO4 (physical pin 7). Change if needed.
 #define MAX_TIMINGS 85     // We expect ~80 edges; add some headroom.
 
 static inline uint32_t micros_now() { return gpioTick(); }
