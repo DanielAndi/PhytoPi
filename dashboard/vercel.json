@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "chmod +x scripts/build.sh && bash scripts/build.sh",
+  "buildCommand": "chmod +x scripts/build/build.sh && bash scripts/build/build.sh",
   "outputDirectory": "build/web",
   "framework": null,
   "installCommand": "echo 'Flutter dependencies installed during build'",

@@ -80,6 +80,23 @@ echo ""
 # Navigate to dashboard directory
 cd "$DASHBOARD_DIR"
 
+# Load environment variables from .env files (optional override)
+# run_local.sh auto-detects Supabase, but .env can override if needed
+UTILS_DIR="$(cd "$SCRIPT_DIR/../utils" && pwd)"
+if [ -f "$UTILS_DIR/load_env.sh" ]; then
+    # Only load if SUPABASE_URL/KEY not already set from auto-detection
+    # This allows .env to override auto-detection if desired
+    if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+        source "$UTILS_DIR/load_env.sh"
+        # Use .env values if they exist and auto-detection didn't work
+        if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
+            API_URL="$SUPABASE_URL"
+            ANON_KEY="$SUPABASE_ANON_KEY"
+            echo "📋 Using Supabase config from .env file"
+        fi
+    fi
+fi
+
 # Check if Flutter is installed
 if ! command -v flutter &> /dev/null; then
     echo "❌ Flutter is not installed or not in PATH"

@@ -31,11 +31,11 @@ supabase start
 
 # Run dashboard (from dashboard directory)
 cd dashboard
-./scripts/run_local.sh
+./scripts/dev/run_local.sh
 ```
 
 **Production Deployment:**
-See [QUICKSTART.md](./QUICKSTART.md) for detailed deployment instructions.
+See [docs/getting-started/QUICKSTART.md](./docs/getting-started/QUICKSTART.md) for detailed deployment instructions.
 
 ### Installation
 
@@ -46,14 +46,22 @@ See [QUICKSTART.md](./QUICKSTART.md) for detailed deployment instructions.
    ```
 
 2. **Configure environment variables:**
-   See [env.example](./env.example) for environment variable template.
+   ```bash
+   # Quick setup for web development
+   ./scripts/utils/setup_env.sh web
+   
+   # Or for Android testing
+   ./scripts/utils/setup_env.sh android
+   ```
    
    For local development, the script automatically detects Supabase configuration.
    For production, set environment variables in Vercel dashboard.
+   
+   See [docs/configuration/ENV_WORKFLOW.md](./docs/configuration/ENV_WORKFLOW.md) for detailed environment setup.
 
 3. **Run the development server:**
    ```bash
-   ./scripts/run_local.sh
+   ./scripts/dev/run_local.sh
    ```
    
    Or manually:
@@ -96,12 +104,12 @@ export SUPABASE_URL=https://your-project.supabase.co
 export SUPABASE_ANON_KEY=your-anon-key
 
 # Build
-./scripts/build_prod.sh
+./scripts/build/build_prod.sh
 ```
 
-Or use the Vercel build script:
+Or use the Vercel build script (automatically used by Vercel):
 ```bash
-./scripts/build.sh
+./scripts/build/build.sh
 ```
 
 ### Code Quality
@@ -132,9 +140,16 @@ This project is configured for deployment on Vercel.
 
 ### Documentation
 
-- **[QUICKSTART.md](./QUICKSTART.md)** - Quick start guide for local and production
-- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Detailed deployment guide
+All documentation is organized in the [`docs/`](./docs/) directory:
+
+- **[docs/getting-started/](./docs/getting-started/)** - Getting started guides
+- **[docs/configuration/](./docs/configuration/)** - Configuration guides
+- **[docs/platform/](./docs/platform/)** - Platform-specific guides
+- **[docs/deployment/](./docs/deployment/)** - Deployment guides
+- **[docs/development/](./docs/development/)** - Development guides
 - **[scripts/README.md](./scripts/README.md)** - Scripts documentation
+
+See [docs/README.md](./docs/README.md) for the complete documentation index.
 
 ## Contributing
 

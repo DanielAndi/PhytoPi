@@ -49,6 +49,11 @@ app.*.map.json
 .env
 .env.local
 .env.production
+.env.web
+.env.android
+.env.ios
+.env.kiosk
+.env.*.backup
 
 # IDE
 .vscode/

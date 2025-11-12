@@ -31,29 +31,30 @@
 
   <title>PhytoPi Dashboard</title>
   <link rel="manifest" href="manifest.json">
-
-  <script>
-    // The value below is injected by flutter build, do not touch.
-    var serviceWorkerVersion = null;
-  </script>
-  <!-- This script adds the flutter initialization JS code -->
-  <script src="flutter.js" defer></script>
 </head>
 <body>
   <script>
-    window.addEventListener('load', function(ev) {
-      // Download main.dart.js
-      _flutter.loader.loadEntrypoint({
-        serviceWorker: {
-          serviceWorkerVersion: serviceWorkerVersion,
-        },
-        onEntrypointLoaded: function(engineInitializer) {
-          engineInitializer.initializeEngine().then(function(appRunner) {
-            appRunner.runApp();
-          });
-        }
-      });
+    // Loading indicator
+    var loadingDiv = document.createElement('div');
+    loadingDiv.id = 'loading';
+    loadingDiv.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; font-family: sans-serif; z-index: 9999;';
+    loadingDiv.innerHTML = '<p style="font-size: 18px; margin-bottom: 10px;">Loading PhytoPi Dashboard...</p><p style="font-size: 12px; color: #666;">Please wait...</p>';
+    document.body.appendChild(loadingDiv);
+    
+    // Hide loading when Flutter app loads
+    window.addEventListener('flutter-first-frame', function() {
+      var loading = document.getElementById('loading');
+      if (loading) {
+        loading.style.display = 'none';
+      }
     });
   </script>
+  
+  <!-- 
+    flutter_bootstrap.js sets up _flutter.buildConfig and automatically
+    calls _flutter.loader.load() with the correct configuration.
+    This is the standard way to initialize Flutter web apps.
+  -->
+  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

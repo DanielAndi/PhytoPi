@@ -17,20 +17,38 @@ class AuthProvider extends ChangeNotifier {
   }
 
   void _initializeAuth() {
-    // Listen to auth state changes
-    SupabaseConfig.client.auth.onAuthStateChange.listen((data) {
-      _user = data.session?.user;
-      notifyListeners();
-    });
+    if (!SupabaseConfig.isInitialized) {
+      debugPrint('AuthProvider: Supabase not initialized - running in demo mode');
+      _user = null;
+      return;
+    }
+    
+    try {
+      // Listen to auth state changes
+      SupabaseConfig.client?.auth.onAuthStateChange.listen((data) {
+        _user = data.session?.user;
+        notifyListeners();
+      });
+    } catch (e) {
+      // Supabase not initialized, app running in demo mode
+      debugPrint('AuthProvider: Error setting up auth listener - $e');
+      _user = null;
+    }
   }
 
   Future<void> signIn(String email, String password) async {
+    if (!SupabaseConfig.isInitialized) {
+      _error = 'Supabase is not configured';
+      notifyListeners();
+      return;
+    }
+    
     try {
       _isLoading = true;
       _error = null;
       notifyListeners();
 
-      await SupabaseConfig.client.auth.signInWithPassword(
+      await SupabaseConfig.client?.auth.signInWithPassword(
         email: email,
         password: password,
       );
@@ -43,12 +61,18 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signUp(String email, String password) async {
+    if (!SupabaseConfig.isInitialized) {
+      _error = 'Supabase is not configured';
+      notifyListeners();
+      return;
+    }
+    
     try {
       _isLoading = true;
       _error = null;
       notifyListeners();
 
-      await SupabaseConfig.client.auth.signUp(
+      await SupabaseConfig.client?.auth.signUp(
         email: email,
         password: password,
       );
@@ -61,11 +85,17 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
+    if (!SupabaseConfig.isInitialized) {
+      _user = null;
+      notifyListeners();
+      return;
+    }
+    
     try {
       _isLoading = true;
       notifyListeners();
 
-      await SupabaseConfig.client.auth.signOut();
+      await SupabaseConfig.client?.auth.signOut();
     } catch (e) {
       _error = e.toString();
     } finally {
