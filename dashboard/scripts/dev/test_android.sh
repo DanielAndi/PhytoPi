@@ -107,8 +107,120 @@ if command -v adb &> /dev/null; then
     echo "✅ ADB found"
     echo ""
     echo "📱 Connected devices:"
-    adb devices
+    ADB_OUTPUT=$(adb devices)
+    echo "$ADB_OUTPUT"
     echo ""
+    
+    # Check device status
+    DEVICE_STATUS=$(echo "$ADB_OUTPUT" | grep -v "List of devices" | grep -v "^$" | awk '{print $2}' | head -1)
+    DEVICE_ID=$(echo "$ADB_OUTPUT" | grep -v "List of devices" | grep -v "^$" | awk '{print $1}' | head -1)
+    
+    if [ -z "$DEVICE_ID" ]; then
+        echo "❌ No Android device found"
+        echo ""
+        echo "   Your device is physically connected but ADB can't see it."
+        echo ""
+        echo "   Troubleshooting steps (on your phone):"
+        echo ""
+        echo "   1. ⚠️  CONNECT DIRECTLY TO COMPUTER (MOST IMPORTANT):"
+        echo "      - Connect USB cable DIRECTLY to computer"
+        echo "      - NOT through a USB hub"
+        echo "      - USB hubs can cause connection issues with ADB"
+        echo "      - Use a USB port directly on your computer"
+        echo ""
+        echo "   2. CHANGE USB CONNECTION MODE:"
+        echo "      - Pull down notification shade"
+        echo "      - Tap 'USB' or 'Charging this device via USB'"
+        echo "      - Select 'File Transfer' or 'PTP' mode"
+        echo "      - NOT 'Charging only' mode ⚠️"
+        echo ""
+        echo "   3. Check USB Debugging:"
+        echo "      - Settings → Developer Options"
+        echo "      - Make sure 'USB Debugging' is ENABLED"
+        echo ""
+        echo "   4. Authorize USB Debugging:"
+        echo "      - Look for 'Allow USB debugging?' prompt"
+        echo "      - Check 'Always allow from this computer'"
+        echo "      - Tap 'Allow'"
+        echo ""
+        echo "   5. If no prompt appears:"
+        echo "      - Settings → Developer Options"
+        echo "      - Tap 'Revoke USB debugging authorizations'"
+        echo "      - Unplug USB cable"
+        echo "      - Wait 5 seconds"
+        echo "      - Plug USB cable back in"
+        echo "      - Accept the new authorization prompt"
+        echo ""
+        echo "   6. Run fix script:"
+        echo "      ./scripts/dev/fix_android_connection.sh"
+        echo "      or"
+        echo "      ./scripts/dev/quick_fix_adb.sh"
+        exit 1
+    elif [ "$DEVICE_STATUS" = "offline" ]; then
+        echo "⚠️  Device is OFFLINE"
+        echo ""
+        echo "   This happens when you disconnect and reconnect your phone."
+        echo "   The phone defaults to 'Charging only' mode which ADB can't use."
+        echo ""
+        echo "   📱 FIX THIS ON YOUR PHONE (in this order):"
+        echo ""
+        echo "   1. CHANGE USB CONNECTION MODE (MOST IMPORTANT!):"
+        echo "      ⚠️  Pull down notification shade"
+        echo "      ⚠️  Tap 'USB' or 'Charging this device via USB'"
+        echo "      ⚠️  Select 'File Transfer' or 'PTP' mode"
+        echo "      ⚠️  NOT 'Charging only' mode"
+        echo ""
+        echo "   2. AUTHORIZE USB DEBUGGING:"
+        echo "      - Look for 'Allow USB debugging?' prompt"
+        echo "      - Check 'Always allow from this computer'"
+        echo "      - Tap 'Allow'"
+        echo ""
+        echo "   3. IF NO PROMPT APPEARS:"
+        echo "      - Settings → Developer Options"
+        echo "      - Tap 'Revoke USB debugging authorizations'"
+        echo "      - Unplug USB cable"
+        echo "      - Wait 5 seconds"
+        echo "      - Plug USB cable back in"
+        echo "      - Accept the new authorization prompt"
+        echo ""
+        echo "   🔄 Trying to reconnect..."
+        adb kill-server
+        sleep 2
+        adb start-server
+        sleep 3
+        echo ""
+        echo "   Current status:"
+        adb devices
+        echo ""
+        echo "   ✅ After fixing on your phone, run:"
+        echo "      adb devices"
+        echo ""
+        echo "   You should see: $DEVICE_ID    device"
+        echo "   (Not 'offline')"
+        echo ""
+        echo "   Then run this script again:"
+        echo "      ./scripts/dev/test_android.sh"
+        echo ""
+        echo "   Or use the quick fix script:"
+        echo "      ./scripts/dev/quick_fix_adb.sh"
+        exit 1
+    elif [ "$DEVICE_STATUS" = "unauthorized" ]; then
+        echo "⚠️  Device is UNAUTHORIZED"
+        echo ""
+        echo "   On your phone:"
+        echo "   1. Look for 'Allow USB debugging?' prompt"
+        echo "   2. Check 'Always allow from this computer'"
+        echo "   3. Tap 'Allow'"
+        echo ""
+        echo "   If no prompt appears, revoke and re-authorize:"
+        echo "   - Settings → Developer Options"
+        echo "   - Tap 'Revoke USB debugging authorizations'"
+        echo "   - Unplug and replug USB cable"
+        echo "   - Accept the new authorization prompt"
+        exit 1
+    else
+        echo "✅ Device is connected and authorized: $DEVICE_ID"
+    fi
 else
     echo "❌ ADB not found in PATH"
     echo "   Make sure /opt/android-sdk/platform-tools is in PATH"
@@ -287,6 +399,36 @@ if [ -n "$ANDROID_HOME" ] && [ -d "$ANDROID_HOME" ]; then
     fi
 fi
 
+# Check if app is already installed and uninstall if needed
+echo "🔍 Checking if app is already installed..."
+APP_ID="com.example.phytopi_dashboard"
+if adb shell pm list packages | grep -q "$APP_ID"; then
+    echo "⚠️  App is already installed. Uninstalling previous version..."
+    if adb uninstall "$APP_ID" 2>/dev/null; then
+        echo "✅ Previous version uninstalled"
+    else
+        echo "⚠️  Could not uninstall previous version (may have different signature)"
+        echo "   Attempting to install anyway (will try to replace)..."
+    fi
+else
+    echo "✅ App not installed (fresh install)"
+fi
+echo ""
+
+# Check device storage
+echo "🔍 Checking device storage..."
+STORAGE_INFO=$(adb shell df /data | tail -1 | awk '{print $4}')
+if [ -n "$STORAGE_INFO" ]; then
+    # Convert to MB (assuming the output is in KB)
+    STORAGE_MB=$((STORAGE_INFO / 1024))
+    echo "   Available storage: ~${STORAGE_MB}MB"
+    if [ "$STORAGE_MB" -lt 100 ]; then
+        echo "⚠️  Warning: Low storage space (less than 100MB)"
+        echo "   The app may fail to install. Consider freeing up space."
+    fi
+fi
+echo ""
+
 echo "🚀 Running app on Android..."
 echo "   (Press 'q' to quit, 'r' to hot reload, 'R' to hot restart)"
 echo ""
@@ -295,7 +437,8 @@ echo ""
 TEMP_LOG=$(mktemp)
 trap "rm -f $TEMP_LOG" EXIT
 
-if ! flutter run -d "$ANDROID_DEVICE" 2>&1 | tee "$TEMP_LOG"; then
+# Try to run the app
+if ! flutter run -d "$ANDROID_DEVICE" --dart-define=SUPABASE_URL="$SUPABASE_URL" --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" 2>&1 | tee "$TEMP_LOG"; then
     echo ""
     echo "❌ Build failed."
     echo ""
@@ -395,6 +538,53 @@ if ! flutter run -d "$ANDROID_DEVICE" 2>&1 | tee "$TEMP_LOG"; then
         fi
         echo ""
         echo "   Then run this script again."
+    elif grep -q "failed to install\|Error launching application\|INSTALL_FAILED\|ADB exited with exit code 1" "$TEMP_LOG"; then
+        echo "🔧 Installation failure detected."
+        echo ""
+        echo "   The APK was built successfully (✓ Built build/app/outputs/flutter-apk/app-debug.apk)"
+        echo "   but failed to install on the device."
+        echo ""
+        
+        # Extract any error details from the log
+        ERROR_DETAILS=$(grep -i "failed\|error\|install_failed" "$TEMP_LOG" | tail -5)
+        if [ -n "$ERROR_DETAILS" ]; then
+            echo "   Error details:"
+            echo "$ERROR_DETAILS" | sed 's/^/      /'
+            echo ""
+        fi
+        
+        echo "   Common causes and solutions:"
+        echo ""
+        echo "   1. Installation from unknown sources disabled (MOST COMMON):"
+        echo "      - On your phone: Settings → Security"
+        echo "      - Enable 'Install from unknown sources' or 'Install apps via USB'"
+        echo "      - Or: Settings → Apps → Special access → Install unknown apps"
+        echo "      - Enable for 'USB' or 'ADB'"
+        echo ""
+        echo "   2. Device restrictions or security policies:"
+        echo "      - Check if your device has installation restrictions"
+        echo "      - Try: Settings → Developer Options → Verify apps over USB (disable)"
+        echo "      - Or: Settings → Developer Options → USB debugging (security settings)"
+        echo ""
+        echo "   3. Try manual installation with verbose output:"
+        echo "      cd /home/danielg/Documents/PhytoPi/dashboard"
+        echo "      adb install -r -d -g build/app/outputs/flutter-apk/app-debug.apk"
+        echo "      (Flags: -r=replace, -d=downgrade, -g=grant permissions)"
+        echo ""
+        echo "   4. Try pushing APK to phone and install manually:"
+        echo "      adb push build/app/outputs/flutter-apk/app-debug.apk /sdcard/phytopi.apk"
+        echo "      (Then on your phone: File Manager → /sdcard/ → phytopi.apk → Install)"
+        echo ""
+        echo "   5. Check installation logs:"
+        echo "      adb logcat -c  # Clear logs"
+        echo "      adb install -r -d build/app/outputs/flutter-apk/app-debug.apk"
+        echo "      adb logcat -d | grep -i 'package\|install\|failed' | tail -20"
+        echo ""
+        echo "   6. Use the manual installation script:"
+        echo "      ./scripts/dev/install_apk.sh"
+        echo ""
+        echo "   The APK is ready at: build/app/outputs/flutter-apk/app-debug.apk"
+        echo "   You can also manually transfer it to your phone and install it."
     else
         echo "   To see more details, run:"
         echo "   cd android && ./gradlew assembleDebug --stacktrace"

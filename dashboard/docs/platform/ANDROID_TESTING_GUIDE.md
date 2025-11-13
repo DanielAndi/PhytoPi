@@ -75,6 +75,9 @@ supabase start
    - Enable **Install via USB** (optional, but recommended)
 
 3. **Connect Your Phone**:
+   - ⚠️ **IMPORTANT**: Connect your phone **directly to your computer** (NOT through a USB hub)
+   - USB hubs can cause connection issues with ADB
+   - Use a USB port directly on your computer
    - Connect your phone to your computer via USB
    - On your phone, you'll see a prompt: "Allow USB debugging?"
    - Check **"Always allow from this computer"** and tap **Allow**
@@ -296,8 +299,10 @@ adb start-server
 adb devices
 
 # Check USB connection
+# ⚠️ IMPORTANT: Connect directly to computer (NOT through USB hub)
+# USB hubs can cause connection issues with ADB
 # Try a different USB cable
-# Try a different USB port
+# Try a different USB port on your computer
 ```
 
 ### Issue: "Unauthorized" Device
