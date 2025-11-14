@@ -9,6 +9,7 @@ import 'core/config/supabase_config.dart';
 import 'core/platform/platform_detector.dart';
 import 'features/auth/providers/auth_provider.dart';
 import 'features/dashboard/screens/dashboard_screen.dart';
+import 'features/marketing/screens/landing_page_screen.dart';
 import 'shared/widgets/platform_wrapper.dart';
 
 void main() async {
@@ -137,11 +138,21 @@ class PhytoPiApp extends StatelessWidget {
         home: Builder(
           builder: (context) {
             try {
-              return const PlatformWrapper(
-                child: DashboardScreen(),
-              );
+              // Show landing page for web, dashboard for kiosk/mobile
+              // Landing page allows navigation to dashboard
+              if (PlatformDetector.isWeb) {
+                return const LandingPageScreen();
+              } else if (PlatformDetector.isKiosk) {
+                // Kiosk mode: show dashboard directly
+                return const PlatformWrapper(
+                  child: DashboardScreen(),
+                );
+              } else {
+                // Mobile: show landing page (can navigate to dashboard)
+                return const LandingPageScreen();
+              }
             } catch (e, stack) {
-              debugPrint('Error building dashboard: $e');
+              debugPrint('Error building initial screen: $e');
               debugPrint('Stack: $stack');
               return Scaffold(
                 body: Center(
@@ -150,7 +161,7 @@ class PhytoPiApp extends StatelessWidget {
                     children: [
                       const Icon(Icons.error, size: 48, color: Colors.red),
                       const SizedBox(height: 16),
-                      Text('Error loading dashboard: $e'),
+                      Text('Error loading app: $e'),
                     ],
                   ),
                 ),
