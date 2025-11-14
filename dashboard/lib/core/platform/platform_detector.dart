@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
@@ -36,9 +37,18 @@ class PlatformDetector {
   }
   
   static AppPlatform _getPlatformNative() {
-    // This is a stub - the actual implementation will be in platform-specific files
-    // For now, return web as safe default
-    return AppPlatform.web;
+    // Check if we're in kiosk mode first (Linux with KIOSK_MODE=true)
+    if (_isKioskMode()) {
+      return AppPlatform.kiosk;
+    }
+    
+    // Check if mobile platform
+    if (_isMobileNative()) {
+      return AppPlatform.mobile;
+    }
+    
+    // Default to desktop for Linux, Windows, macOS
+    return AppPlatform.desktop;
   }
 
   static bool get isWeb => kIsWeb;
@@ -53,8 +63,8 @@ class PlatformDetector {
   }
   
   static bool _isMobileNative() {
-    // Stub - should be implemented in platform-specific code
-    return false;
+    // Check if running on Android or iOS
+    return Platform.isAndroid || Platform.isIOS;
   }
   
   static bool get isKiosk => currentPlatform == AppPlatform.kiosk;
@@ -69,8 +79,8 @@ class PlatformDetector {
   }
   
   static bool _isDesktopNative() {
-    // Stub - should be implemented in platform-specific code
-    return false;
+    // Check if running on desktop platforms (Linux, Windows, macOS)
+    return Platform.isLinux || Platform.isWindows || Platform.isMacOS;
   }
 
   static bool _isKioskMode() {

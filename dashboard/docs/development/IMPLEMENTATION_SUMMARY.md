@@ -246,7 +246,7 @@ flutter run -d linux
 - **KIOSK_DEPLOYMENT.md**: Raspberry Pi deployment guide
 - **scripts/README.md**: Build scripts documentation
 - **lib/core/platform/README.md**: Platform utilities documentation
-
+- **DEPLOYMENT_WORKFLOW.md**: Development → production release workflow
 ## Status
 
 ✅ **All components implemented and ready for use**
