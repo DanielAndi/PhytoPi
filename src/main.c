@@ -1,18 +1,22 @@
-#include "gpio_io.h"
+#include "../lib/gpio_io.h"
 
 int main()
 {
-    gpio_init();        // Initialize GPIO memory mapping
-    gpio_config(26, 0); // Configure GPIO pin 5 with function select 0
+    peri_init(); // Initialize peripheral memory mapping
+
+    uint32_t pin = 26;        // Example GPIO pin number
+    uint32_t func_select = 5; // Example function select value (GPIO function)
+
+    gpio_func_select(pin, func_select); // Set GPIO function for the pin
+    pad_set(pin, 0x10);                 // Ensure pad is set for output
+    rio_set_output(pin);                // Configure the pin as output
 
     while (1)
     {
+        write_gpio(pin, 0); // Set pin low
         sleep(1);
-        gpio_write(26, 1);         // Set GPIO pin 5 high
-        int value = gpio_read(26); // Read the value of GPIO pin 5
-        printf("GPIO pin 26 value: %d\n", value);
-        sleep(2);          // Wait for 1 second
-        gpio_write(26, 0); // Set GPIO pin 5 low
+        write_gpio(pin, 1); // Initialize pin to high
+        sleep(1);
     }
 
     return 0;

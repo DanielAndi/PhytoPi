@@ -1,34 +1,14 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <unistd.h>
-#include "gpio_io.h"
-#include <stdint.h>
+#include "../lib/gpio_io.h"
 
-/*
-   From the RP1 datasheet I got the byte offsets for each control and set register for each GPIO pin. However, we need to access them as 32-bit words because when we initialize the GPIO with gpio_init(), we map the peripheral into a 32-bit pointer. This means we divide the byte offset by 4, giving us the word offset which we use to index into the gpio pointer in the macros below.
-*/
+uint32_t *PERIbase;
+uint32_t *GPIObase;
+uint32_t *RIObase;
+uint32_t *PADbase;
+uint32_t *pad_reg;
 
-// Macros for accessing control and set registers for GPIO pins
-#define GPIO_STATUS_OFFSET(pin_num) ((pin_num) * 2)      // Set register offset for pin
-#define GPIO_CONTROL_OFFSET(pin_num) ((pin_num) * 2 + 1) // Control register offset for pin
-
-#define GPIO_STATUS(pin_num) (*(gpio + GPIO_STATUS_OFFSET(pin_num)))   // Set register for pin
-#define GPIO_CONTROL(pin_num) (*(gpio + GPIO_CONTROL_OFFSET(pin_num))) // Control register for pin
-
-// I'm using a bit mask here to set the output bit to 0 and leave the other bits unchanged
-// We negate 1 because 1 in binary is 00000001 and we want to clear just that bit.
-#define GPIO_CLEAR(pin_num) (*(gpio + GPIO_CONTROL_OFFSET(pin_num)) &= ~(1)) // Clear register for pin
-
-static volatile uint32_t *gpio; // Pointer to  a portion of GPIO memory
-
-void gpio_init(void)
+void peri_init(void)
 {
-    int fd;         // File descriptor for /dev/mem
-    char *gpio_map; // Pointer to mapped GPIO memory
-
-    fd = open("/dev/mem", O_RDWR | O_SYNC); // Opens /dev/mem for memory access
+    int fd = open("/dev/mem", O_RDWR | O_SYNC); // Opens /dev/mem for memory access
     if (fd < 0)
     {
         perror("Failed to open /dev/mem");
@@ -36,47 +16,60 @@ void gpio_init(void)
     }
 
     // Kernel picks a virtual address that maps to physical GPIO location
-    gpio_map = mmap(
+    uint32_t *map = mmap(
         NULL,                   // Any address in our space will do
         BLOCK_SIZE,             // # of bytes to map
         PROT_READ | PROT_WRITE, // Enable reading & writing to mapped memory
         MAP_SHARED,             // Shared with other processes
         fd,                     // File descriptor to map
-        GPIO_BASE               // Offset to GPIO peripheral
+        0x1f00000000            // Peripheral base address
     );
 
-    if (gpio_map == MAP_FAILED)
+    if (map == MAP_FAILED)
     {
         perror("Failed to map GPIO memory");
         close(fd);
         exit(1); // Exit if mmap fails
     }
 
-    close(fd);                                // No longer need /dev/mem after mmap
-    gpio = (volatile unsigned int *)gpio_map; // Assign mapped memory to gpio pointer
+    close(fd);                         // No longer need /dev/mem after mmap
+    PERIbase = map;                    // Assign mapped memory to peripheral base
+    GPIObase = PERIbase + 0xD0000 / 4; // GPIO base offset
+    RIObase = PERIbase + 0xE0000 / 4;  // RIO base offset
+    PADbase = PERIbase + 0xF0000 / 4;  // PAD base offset
+    pad_reg = PADbase + 1;             // Specific PAD register
 }
 
-void gpio_config(int pin_num, int func_select)
+#define GPIO ((GPIOregs *)GPIObase)
+#define rio ((rioregs *)RIObase)
+#define rioXOR ((rioregs *)(RIObase + 0x1000 / 4))
+#define rioSET ((rioregs *)(RIObase + 0x2000 / 4))
+#define rioCLR ((rioregs *)(RIObase + 0x3000 / 4))
+
+void gpio_func_select(uint32_t pin, uint32_t func)
 {
-    GPIO_CONTROL(pin_num) &= ~(0x1F);              // Clear the first 5 bits which contain the function select
-    GPIO_CONTROL(pin_num) |= (func_select & 0x1F); // Set the function select bits to the desired value
+    GPIO[pin].ctrl = func;
 }
 
-void inline gpio_write(int pin_num, int value)
+void pad_set(uint32_t pin, uint32_t value)
 {
-    GPIO_CONTROL(pin_num) &= ~(0x3 << 12); // Clear bits 13:12 first
-    // If driving line high, use GPIO_CONTROL (STATUS IS READ ONLY!!!), otherwise just use GPIO_CLEAR
-    if (value) // Force output high
+    pad_reg[pin] = value;
+}
+
+void rio_set_output(uint32_t pin)
+{
+    rioSET->OE = (1 << pin);  // Set pin as output
+    rioSET->Out = (1 << pin); // Initialize output to high
+}
+
+void write_gpio(uint32_t pin, uint32_t value)
+{
+    if (value)
     {
-        GPIO_CONTROL(pin_num) |= (0x3 << 12); // Refer to RP1 datasheet, bits 13:12 are for status output bit override
+        rioSET->Out = (1 << pin); // Set pin high
     }
-    else // Force output low
+    else
     {
-        GPIO_CONTROL(pin_num) |= (0x2 << 12);
+        rioCLR->Out = (1 << pin); // Set pin low
     }
-}
-
-inline int gpio_read(int pin_num)
-{
-    return GPIO_STATUS(pin_num) & 1; // Returns rightmost (output) bit (0 or 1)
 }
