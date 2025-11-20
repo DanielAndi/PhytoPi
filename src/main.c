@@ -2,14 +2,18 @@
 
 int main()
 {
-    gpio_init(); // Initialize GPIO memory mapping
+    gpio_init();        // Initialize GPIO memory mapping
+    gpio_config(26, 0); // Configure GPIO pin 5 with function select 0
 
-    int pin = 17;               // Example GPIO pin number
-    gpio_write(pin, 1);         // Set pin high
-    int state = gpio_read(pin); // Read pin state
-
-    gpio_write(pin, 0);     // Set pin low
-    state = gpio_read(pin); // Read pin state
+    while (1)
+    {
+        sleep(1);
+        gpio_write(26, 1);         // Set GPIO pin 5 high
+        int value = gpio_read(26); // Read the value of GPIO pin 5
+        printf("GPIO pin 26 value: %d\n", value);
+        sleep(2);          // Wait for 1 second
+        gpio_write(26, 0); // Set GPIO pin 5 low
+    }
 
     return 0;
 }
