@@ -11,10 +11,11 @@ TARGET = $(BINDIR)/phytopi
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
+	mkdir -p $(BINDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) $(TARGET)
+	rm -f $(OBJ) $(TARGET) ${BINDIR}/*
