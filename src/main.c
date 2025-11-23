@@ -54,6 +54,7 @@ int main()
 
     sqlite3_close(db); // Close the database connection
     gpio_cleanup();    // Cleanup GPIO resources
+    close(fd);         // Close I2C file descriptor
 
     return 0;
 }
