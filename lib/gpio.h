@@ -8,6 +8,7 @@
 #include <pigpio.h> // We have to use pigpio because it runs a Linux daemon which can handle precise timing because of the dht22 init sequence.
 
 #define DHT22_PIN 26
+#define DATA_READ_INTERVAL 60 // In seconds
 
 /* GPIO function declarations */
 int gpio_init();

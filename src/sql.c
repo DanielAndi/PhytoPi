@@ -19,3 +19,50 @@ int sql_execute(sqlite3 *db, const char *sql)
 
     return SQLITE_OK;
 }
+
+/*
+ * Execute an SQL insert statement with parameters on the given database.
+ * Returns SQLITE_OK on success, or an SQLite error code on failure.
+ */
+int sql_execute_insert(sqlite3 *db, const char *sql, int data, int data2, int timestamp)
+{
+    sqlite3_stmt *stmt;                                    // Declare a statement pointer
+    int rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL); // Prepare the SQL statement
+    if (rc != SQLITE_OK)
+    {
+        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+        return rc;
+    }
+
+    // Bind the parameters to the prepared statement
+    sqlite3_bind_int(stmt, 1, data);
+    sqlite3_bind_int(stmt, 2, data2);
+    sqlite3_bind_int(stmt, 3, timestamp);
+
+    rc = sqlite3_step(stmt); // Execute the prepared statement
+
+    if (rc != SQLITE_DONE && rc != SQLITE_OK)
+    {
+        fprintf(stderr, "Execution failed: %s\n", sqlite3_errmsg(db));
+        sqlite3_finalize(stmt); // Finalize the statement to release resources
+        return rc;
+    }
+
+    sqlite3_finalize(stmt); // Finalize the statement to release resources
+    return SQLITE_OK;
+}
+
+sqlite3 *db_init(const char *db_file)
+{
+    sqlite3 *db;
+    int rc = sqlite3_open(db_file, &db);
+    if (rc)
+    {
+        fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+        return NULL;
+    }
+
+    sql_execute(db, "CREATE TABLE IF NOT EXISTS sensor_data (id INTEGER PRIMARY KEY, humidity INTEGER, temperature INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);");
+
+    return db;
+}
