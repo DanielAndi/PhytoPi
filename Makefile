@@ -1,8 +1,8 @@
 CC = gcc
 CFLAGS = -Wall -O2 -Ilib
-LDFLAGS = -lpigpio -lpthread -lrt -lsqlite3
+LDFLAGS = -lgpiod -lpthread -lrt -lsqlite3
 
-SRC = src/main.c src/gpio.c src/dht22.c src/sql.c
+SRC = src/main.c src/gpio.c src/sql.c
 OBJ = $(SRC:.c=.o)
 
 TARGET = main

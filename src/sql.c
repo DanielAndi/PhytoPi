@@ -36,7 +36,8 @@ int sql_execute_insert(sqlite3 *db, const char *sql, int data, int data2, int ti
 
     // Bind the parameters to the prepared statement
     sqlite3_bind_int(stmt, 1, data);
-    sqlite3_bind_int(stmt, 2, data2);
+    if (data2 != 0) // Only bind the second data if it's not zero (for dht11)
+        sqlite3_bind_int(stmt, 2, data2);
     sqlite3_bind_int(stmt, 3, timestamp);
 
     rc = sqlite3_step(stmt); // Execute the prepared statement
@@ -62,7 +63,9 @@ sqlite3 *db_init(const char *db_file)
         return NULL;
     }
 
-    sql_execute(db, "CREATE TABLE IF NOT EXISTS sensor_data (id INTEGER PRIMARY KEY, humidity INTEGER, temperature INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);");
+    sql_execute(db, "CREATE TABLE IF NOT EXISTS temp_hum_data (id INTEGER PRIMARY KEY, humidity INTEGER, temperature INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);");
+    sql_execute(db, "CREATE TABLE IF NOT EXISTS soil_moisture_data (id INTEGER PRIMARY KEY, humidity INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);");
+    sql_execute(db, "CREATE TABLE IF NOT EXISTS water_level_data (id INTEGER PRIMARY KEY, has_water BOOLEAN, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);");
 
     return db;
 }
