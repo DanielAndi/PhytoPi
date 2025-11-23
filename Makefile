@@ -1,7 +1,8 @@
 CC = gcc
 CFLAGS = -Wall -O2 -Ilib
+LDFLAGS = -lpigpio -lpthread -lrt -lsqlite3
 
-SRC = src/main.c src/gpio_io.c
+SRC = src/main.c src/gpio.c src/dht22.c src/sql.c
 OBJ = $(SRC:.c=.o)
 
 TARGET = main
@@ -9,7 +10,7 @@ TARGET = main
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

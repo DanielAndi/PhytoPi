@@ -1,23 +1,32 @@
-#include "../lib/gpio_io.h"
+#include "../lib/gpio.h"
+#include "../lib/sql.h"
 
 int main()
 {
-    peri_init(); // Initialize peripheral memory mapping
+    int humidity = 0;
+    int temperature = 0;
 
-    uint32_t pin = 26;        // Example GPIO pin number
-    uint32_t func_select = 5; // Example function select value (GPIO function)
+    sqlite3 *db;
 
-    gpio_func_select(pin, func_select); // Set GPIO function for the pin
-    pad_set(pin, 0x10);                 // Ensure pad is set for output
-    rio_set_output(pin);                // Configure the pin as output
+    char sql[256];
+    sqlite3_open("sensor_data.db", &db);
+
+    sql_execute(db, "CREATE TABLE IF NOT EXISTS sensor_data (id INTEGER PRIMARY KEY, humidity INTEGER, temperature INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);");
 
     while (1)
     {
-        write_gpio(pin, 0); // Set pin low
-        sleep(1);
-        write_gpio(pin, 1); // Initialize pin to high
-        sleep(1);
+        read_dht_via_kernel(&humidity, &temperature);
+
+        printf("Humidity: %d%%, Temperature: %dC\n", humidity, temperature);
+
+        snprintf(sql, sizeof(sql), "INSERT INTO sensor_data (humidity, temperature, timestamp) VALUES (%d, %d, %li);", humidity, temperature, time(NULL));
+
+        sql_execute(db, sql);
+
+        sleep(120);
     }
+
+    sqlite3_close(db);
 
     return 0;
 }
