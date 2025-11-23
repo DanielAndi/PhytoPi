@@ -1,11 +1,12 @@
 CC = gcc
 CFLAGS = -Wall -O2 -Ilib
 LDFLAGS = -lgpiod -lpthread -lrt -lsqlite3
+BINDIR = bin
 
 SRC = src/main.c src/gpio.c src/sql.c
 OBJ = $(SRC:.c=.o)
 
-TARGET = main
+TARGET = $(BINDIR)/phytopi
 
 all: $(TARGET)
 

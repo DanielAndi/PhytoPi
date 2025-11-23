@@ -40,4 +40,12 @@ node_modules/
 
 # Build outputs
 dist/
-build/
+bin/
+
+# Object files
+*.o
+*.obj
+
+
+# SQLite database files
+*.db
