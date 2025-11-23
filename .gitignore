@@ -49,3 +49,4 @@ bin/
 
 # SQLite database files
 *.db
+sensor_data.db
