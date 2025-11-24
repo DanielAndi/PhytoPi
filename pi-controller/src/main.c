@@ -165,8 +165,8 @@ int main()
     gpio_config_input(WATER_LEVEL_PIN);
 
     // Variables to hold sensor data
-    int humidity = 0;
-    int temperature = 0;
+    int humidity = -1;      // Initialize to -1 (error state)
+    int temperature = -1;   // Initialize to -1 (error state)
     int soil_moisture = 0;
     int water_level = 0;
 
@@ -215,13 +215,30 @@ int main()
     char sql_water_level[256] = "INSERT INTO water_level_data (has_water, timestamp) VALUES (?, ?);";
 
     time_t last_sync = time(NULL);
+    time_t last_dht_read = 0;  // Track last DHT11 read time (needs 2+ second cooldown)
     int iteration = 0;
 
     while (1)
     {
         soil_moisture = (fd >= 0) ? read_ads7830_channel(fd, 0) : -1;  // Read soil moisture from A0
         water_level = gpio_read(WATER_LEVEL_PIN);     // Read water level from GPIO pin
-        int dht_result = read_dht_via_kernel(&humidity, &temperature); // Read DHT11 sensor data
+        
+        // DHT11 needs at least 2 seconds between reads
+        time_t now = time(NULL);
+        int dht_result = -1;
+        if (now - last_dht_read >= 2)
+        {
+            dht_result = read_dht_via_kernel(&humidity, &temperature); // Read DHT11 sensor data
+            if (dht_result == 0)
+            {
+                last_dht_read = now;  // Only update on success
+            }
+        }
+        else
+        {
+            // Use previous values if we're in cooldown period
+            // (humidity and temperature retain their previous values)
+        }
         
         // If DHT11 read failed, set values to -1 to indicate error
         if (dht_result != 0)
@@ -230,8 +247,19 @@ int main()
             temperature = -1;
             if (iteration % 30 == 0) // Print error every 60 seconds
             {
-                fprintf(stderr, "Warning: DHT11 sensor read failed (error code: %d). Check GPIO pin %d connection.\n", 
-                        dht_result, DHT22_PIN);
+                const char *error_msg = "Unknown error";
+                switch (dht_result)
+                {
+                    case -1: error_msg = "Failed to open GPIO chip or get line"; break;
+                    case -2: error_msg = "No response signal (low)"; break;
+                    case -3: error_msg = "No response signal (high)"; break;
+                    case -4: error_msg = "No response signal (low after high)"; break;
+                    case -5: error_msg = "Data read timeout (high)"; break;
+                    case -6: error_msg = "Data read timeout (low)"; break;
+                    case -7: error_msg = "Checksum mismatch"; break;
+                }
+                fprintf(stderr, "Warning: DHT11 sensor read failed (error: %d - %s). Check GPIO pin %d connection and wiring.\n", 
+                        dht_result, error_msg, DHT22_PIN);
             }
         }
         
