@@ -69,6 +69,58 @@ sqlite3 *db_init(const char *db_file)
     sql_execute(db, "CREATE TABLE IF NOT EXISTS soil_moisture_data (id INTEGER PRIMARY KEY, humidity INTEGER, timestamp INTEGER, synced INTEGER DEFAULT 0);");
     sql_execute(db, "CREATE TABLE IF NOT EXISTS water_level_data (id INTEGER PRIMARY KEY, has_water BOOLEAN, timestamp INTEGER, synced INTEGER DEFAULT 0);");
 
+    // Migrate existing tables: add synced column if it doesn't exist
+    // SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we check first
+    sqlite3_stmt *check_stmt;
+    int has_synced = 0;
+    
+    // Check temp_hum_data
+    if (sqlite3_prepare_v2(db, "PRAGMA table_info(temp_hum_data);", -1, &check_stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(check_stmt) == SQLITE_ROW) {
+            const char *col_name = (const char *)sqlite3_column_text(check_stmt, 1);
+            if (col_name && strcmp(col_name, "synced") == 0) {
+                has_synced = 1;
+                break;
+            }
+        }
+        sqlite3_finalize(check_stmt);
+        if (!has_synced) {
+            sql_execute(db, "ALTER TABLE temp_hum_data ADD COLUMN synced INTEGER DEFAULT 0;");
+        }
+    }
+    
+    // Check soil_moisture_data
+    has_synced = 0;
+    if (sqlite3_prepare_v2(db, "PRAGMA table_info(soil_moisture_data);", -1, &check_stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(check_stmt) == SQLITE_ROW) {
+            const char *col_name = (const char *)sqlite3_column_text(check_stmt, 1);
+            if (col_name && strcmp(col_name, "synced") == 0) {
+                has_synced = 1;
+                break;
+            }
+        }
+        sqlite3_finalize(check_stmt);
+        if (!has_synced) {
+            sql_execute(db, "ALTER TABLE soil_moisture_data ADD COLUMN synced INTEGER DEFAULT 0;");
+        }
+    }
+    
+    // Check water_level_data
+    has_synced = 0;
+    if (sqlite3_prepare_v2(db, "PRAGMA table_info(water_level_data);", -1, &check_stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(check_stmt) == SQLITE_ROW) {
+            const char *col_name = (const char *)sqlite3_column_text(check_stmt, 1);
+            if (col_name && strcmp(col_name, "synced") == 0) {
+                has_synced = 1;
+                break;
+            }
+        }
+        sqlite3_finalize(check_stmt);
+        if (!has_synced) {
+            sql_execute(db, "ALTER TABLE water_level_data ADD COLUMN synced INTEGER DEFAULT 0;");
+        }
+    }
+
     // Create indexes for faster unsynced queries
     sql_execute(db, "CREATE INDEX IF NOT EXISTS idx_temp_hum_synced ON temp_hum_data(synced);");
     sql_execute(db, "CREATE INDEX IF NOT EXISTS idx_soil_moisture_synced ON soil_moisture_data(synced);");
