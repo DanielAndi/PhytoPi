@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <time.h>
 
-#define SYNC_INTERVAL 60  // Sync to Supabase every 60 seconds
+#define SYNC_INTERVAL 5   // Sync to Supabase every 5 seconds
 #define BATCH_SIZE 50     // Maximum readings per batch
 
 // Sensor ID mapping - these should match your Supabase sensors table
@@ -230,15 +230,17 @@ int main()
             temperature = -1;
             if (iteration % 30 == 0) // Print error every 60 seconds
             {
-                fprintf(stderr, "Warning: DHT11 sensor read failed (check /sys/bus/iio/devices/iio:device0/)\n");
+                fprintf(stderr, "Warning: DHT11 sensor read failed (error code: %d). Check GPIO pin %d connection.\n", 
+                        dht_result, DHT22_PIN);
             }
         }
         
         // Debug output (prints every 30 seconds)
         if (iteration % 15 == 0) // Print every 30 seconds (15 iterations * 2 seconds)
         {
-            printf("Sensor readings - Soil: %d, Water: %d, Humidity: %d%%, Temp: %d°C\n", 
-                   soil_moisture, water_level, humidity, temperature);
+            const char *water_status = (water_level == 1) ? "HAS WATER" : "NO WATER";
+            printf("Sensor readings - Soil: %d, Water Level: %d (%s), Humidity: %d%%, Temp: %d°C\n", 
+                   soil_moisture, water_level, water_status, humidity, temperature);
         }
 
         int timestamp = (int)time(NULL); // Make one current timestamp for all inserts so they all match

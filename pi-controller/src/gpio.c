@@ -1,4 +1,6 @@
 #include "../lib/gpio.h"
+#include <stdint.h>
+#include <time.h>
 
 static struct gpiod_chip *chip;
 static struct gpiod_line *line;
@@ -66,28 +68,114 @@ int gpio_cleanup()
  */
 
 /*
- * Read temperature and humidity from DHT22 sensor via kernel interface.
- * Returns 0 on success, -1 on failure.
+ * Helper function to get current time in microseconds
+ */
+static uint64_t micros_now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ULL + ts.tv_nsec / 1000;
+}
+
+/*
+ * Helper function to wait for GPIO line to reach a specific level
+ * Returns duration in microseconds, or -1 on timeout
+ */
+static int wait_for_level(struct gpiod_line *line, int level, uint32_t timeout_us)
+{
+    uint64_t start = micros_now();
+    while (gpiod_line_get_value(line) != level)
+    {
+        if ((micros_now() - start) > timeout_us)
+            return -1;
+    }
+    return (int)(micros_now() - start);
+}
+
+/*
+ * Read temperature and humidity from DHT11/DHT22 sensor via GPIO.
+ * Uses the DHT22_PIN defined in gpio.h (pin 21).
+ * Returns 0 on success, negative value on failure.
  */
 int read_dht_via_kernel(int *humidity, int *temperature)
 {
-    FILE *f;
-    int t_raw, h_raw;
-
-    f = fopen("/sys/bus/iio/devices/iio:device0/in_temp_input", "r");
-    if (!f)
+    struct gpiod_chip *dht_chip = gpiod_chip_open_by_name("gpiochip0");
+    if (!dht_chip)
         return -1;
-    fscanf(f, "%d", &t_raw);
-    fclose(f);
 
-    f = fopen("/sys/bus/iio/devices/iio:device0/in_humidityrelative_input", "r");
-    if (!f)
+    struct gpiod_line *dht_line = gpiod_chip_get_line(dht_chip, DHT22_PIN);
+    if (!dht_line)
+    {
+        gpiod_chip_close(dht_chip);
         return -1;
-    fscanf(f, "%d", &h_raw);
-    fclose(f);
+    }
 
-    *temperature = t_raw / 1000;
-    *humidity = h_raw / 1000;
+    uint8_t data[5] = {0};
+
+    // Start signal: pull low for 20ms, then high for 40us
+    gpiod_line_release(dht_line);
+    gpiod_line_request_output(dht_line, "dht11", 1);
+    usleep(1000);
+    gpiod_line_set_value(dht_line, 0);
+    usleep(20000);  // 20ms
+    gpiod_line_set_value(dht_line, 1);
+    usleep(40);     // 40us
+    gpiod_line_release(dht_line);
+
+    // Switch to input mode with pull-up
+    gpiod_line_request_input_flags(dht_line, "dht11", GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP);
+
+    // Wait for response signal
+    if (wait_for_level(dht_line, 0, 200) < 0)
+    {
+        gpiod_line_release(dht_line);
+        gpiod_chip_close(dht_chip);
+        return -2;
+    }
+    if (wait_for_level(dht_line, 1, 200) < 0)
+    {
+        gpiod_line_release(dht_line);
+        gpiod_chip_close(dht_chip);
+        return -3;
+    }
+    if (wait_for_level(dht_line, 0, 200) < 0)
+    {
+        gpiod_line_release(dht_line);
+        gpiod_chip_close(dht_chip);
+        return -4;
+    }
+
+    // Read 40 bits of data
+    for (int i = 0; i < 40; i++)
+    {
+        if (wait_for_level(dht_line, 1, 150) < 0)
+        {
+            gpiod_line_release(dht_line);
+            gpiod_chip_close(dht_chip);
+            return -5;
+        }
+        int high_duration = wait_for_level(dht_line, 0, 150);
+        if (high_duration < 0)
+        {
+            gpiod_line_release(dht_line);
+            gpiod_chip_close(dht_chip);
+            return -6;
+        }
+
+        // If high duration > 50us, it's a '1', otherwise '0'
+        data[i / 8] = (data[i / 8] << 1) | (high_duration > 50 ? 1 : 0);
+    }
+
+    gpiod_line_release(dht_line);
+    gpiod_chip_close(dht_chip);
+
+    // Verify checksum
+    if ((data[0] + data[1] + data[2] + data[3]) != data[4])
+        return -7;
+
+    // Extract humidity and temperature
+    *humidity = data[0];
+    *temperature = data[2];
 
     return 0;
 }
