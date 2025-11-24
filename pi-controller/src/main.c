@@ -223,11 +223,11 @@ int main()
         soil_moisture = (fd >= 0) ? read_ads7830_channel(fd, 0) : -1;  // Read soil moisture from A0
         water_level = gpio_read(WATER_LEVEL_PIN);     // Read water level from GPIO pin
         
-        // DHT11 needs at least 2 seconds between reads
+        // DHT11 needs at least 2-3 seconds between reads for reliability
         // Also add retry logic for more reliability
         time_t now = time(NULL);
         int dht_result = -1;
-        if (now - last_dht_read >= 2)
+        if (now - last_dht_read >= 3)  // Increased from 2 to 3 seconds
         {
             // Try reading up to 3 times
             for (int retry = 0; retry < 3 && dht_result != 0; retry++)

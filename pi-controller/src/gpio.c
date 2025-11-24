@@ -84,10 +84,15 @@ static uint64_t micros_now(void)
 static int wait_for_level(struct gpiod_line *line, int level, uint32_t timeout_us)
 {
     uint64_t start = micros_now();
+    uint64_t timeout_64 = (uint64_t)timeout_us;
+    
     while (gpiod_line_get_value(line) != level)
     {
-        if ((micros_now() - start) > timeout_us)
+        uint64_t elapsed = micros_now() - start;
+        if (elapsed > timeout_64)
             return -1;
+        // Small delay to avoid busy-waiting
+        usleep(1);
     }
     return (int)(micros_now() - start);
 }
@@ -115,7 +120,7 @@ int read_dht_via_kernel(int *humidity, int *temperature)
     // Start signal: pull low for 20ms, then high for 40us
     // Release any previous state first
     gpiod_line_release(dht_line);
-    usleep(10000);  // Small delay to ensure clean state
+    usleep(50000);  // 50ms delay to ensure clean state and let sensor stabilize
     
     gpiod_line_request_output(dht_line, "dht11", 1);
     usleep(1000);
@@ -125,8 +130,8 @@ int read_dht_via_kernel(int *humidity, int *temperature)
     usleep(40);     // 40us - DHT11 requires 20-40us
     gpiod_line_release(dht_line);
     
-    // Small delay before switching to input mode
-    usleep(10);
+    // Delay before switching to input mode to ensure signal is stable
+    usleep(50);
 
     // Switch to input mode with pull-up
     gpiod_line_request_input_flags(dht_line, "dht11", GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP);
@@ -152,24 +157,30 @@ int read_dht_via_kernel(int *humidity, int *temperature)
     }
 
     // Read 40 bits of data
-    // Increased timeouts for more reliable reading
+    // Further increased timeouts for more reliable reading
     for (int i = 0; i < 40; i++)
     {
-        if (wait_for_level(dht_line, 1, 200) < 0)  // Increased from 150 to 200us
+        // Wait for high pulse (start of bit)
+        int wait_high = wait_for_level(dht_line, 1, 300);  // Increased to 300us for more tolerance
+        if (wait_high < 0)
         {
             gpiod_line_release(dht_line);
             gpiod_chip_close(dht_chip);
-            return -5;
+            return -5;  // Timeout waiting for high
         }
-        int high_duration = wait_for_level(dht_line, 0, 200);  // Increased from 150 to 200us
+        
+        // Wait for low pulse (end of bit) - this is where error -6 occurs
+        int high_duration = wait_for_level(dht_line, 0, 300);  // Increased to 300us
         if (high_duration < 0)
         {
             gpiod_line_release(dht_line);
             gpiod_chip_close(dht_chip);
+            // Error -6: Timeout waiting for low after high
+            // This usually means the sensor stopped responding mid-transmission
             return -6;
         }
 
-        // If high duration > 50us, it's a '1', otherwise '0'
+        // If high duration > 40us, it's a '1', otherwise '0'
         // Adjusted threshold slightly for better reliability
         data[i / 8] = (data[i / 8] << 1) | (high_duration > 40 ? 1 : 0);
     }
