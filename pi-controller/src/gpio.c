@@ -113,32 +113,38 @@ int read_dht_via_kernel(int *humidity, int *temperature)
     uint8_t data[5] = {0};
 
     // Start signal: pull low for 20ms, then high for 40us
+    // Release any previous state first
     gpiod_line_release(dht_line);
+    usleep(10000);  // Small delay to ensure clean state
+    
     gpiod_line_request_output(dht_line, "dht11", 1);
     usleep(1000);
     gpiod_line_set_value(dht_line, 0);
-    usleep(20000);  // 20ms
+    usleep(20000);  // 20ms - DHT11 requires at least 18ms
     gpiod_line_set_value(dht_line, 1);
-    usleep(40);     // 40us
+    usleep(40);     // 40us - DHT11 requires 20-40us
     gpiod_line_release(dht_line);
+    
+    // Small delay before switching to input mode
+    usleep(10);
 
     // Switch to input mode with pull-up
     gpiod_line_request_input_flags(dht_line, "dht11", GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP);
 
-    // Wait for response signal
-    if (wait_for_level(dht_line, 0, 200) < 0)
+    // Wait for response signal (increased timeouts for reliability)
+    if (wait_for_level(dht_line, 0, 300) < 0)  // Increased from 200 to 300us
     {
         gpiod_line_release(dht_line);
         gpiod_chip_close(dht_chip);
         return -2;
     }
-    if (wait_for_level(dht_line, 1, 200) < 0)
+    if (wait_for_level(dht_line, 1, 300) < 0)  // Increased from 200 to 300us
     {
         gpiod_line_release(dht_line);
         gpiod_chip_close(dht_chip);
         return -3;
     }
-    if (wait_for_level(dht_line, 0, 200) < 0)
+    if (wait_for_level(dht_line, 0, 300) < 0)  // Increased from 200 to 300us
     {
         gpiod_line_release(dht_line);
         gpiod_chip_close(dht_chip);
@@ -146,15 +152,16 @@ int read_dht_via_kernel(int *humidity, int *temperature)
     }
 
     // Read 40 bits of data
+    // Increased timeouts for more reliable reading
     for (int i = 0; i < 40; i++)
     {
-        if (wait_for_level(dht_line, 1, 150) < 0)
+        if (wait_for_level(dht_line, 1, 200) < 0)  // Increased from 150 to 200us
         {
             gpiod_line_release(dht_line);
             gpiod_chip_close(dht_chip);
             return -5;
         }
-        int high_duration = wait_for_level(dht_line, 0, 150);
+        int high_duration = wait_for_level(dht_line, 0, 200);  // Increased from 150 to 200us
         if (high_duration < 0)
         {
             gpiod_line_release(dht_line);
@@ -163,7 +170,8 @@ int read_dht_via_kernel(int *humidity, int *temperature)
         }
 
         // If high duration > 50us, it's a '1', otherwise '0'
-        data[i / 8] = (data[i / 8] << 1) | (high_duration > 50 ? 1 : 0);
+        // Adjusted threshold slightly for better reliability
+        data[i / 8] = (data[i / 8] << 1) | (high_duration > 40 ? 1 : 0);
     }
 
     gpiod_line_release(dht_line);

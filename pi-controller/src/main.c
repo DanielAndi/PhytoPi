@@ -224,14 +224,24 @@ int main()
         water_level = gpio_read(WATER_LEVEL_PIN);     // Read water level from GPIO pin
         
         // DHT11 needs at least 2 seconds between reads
+        // Also add retry logic for more reliability
         time_t now = time(NULL);
         int dht_result = -1;
         if (now - last_dht_read >= 2)
         {
-            dht_result = read_dht_via_kernel(&humidity, &temperature); // Read DHT11 sensor data
-            if (dht_result == 0)
+            // Try reading up to 3 times
+            for (int retry = 0; retry < 3 && dht_result != 0; retry++)
             {
-                last_dht_read = now;  // Only update on success
+                if (retry > 0)
+                {
+                    usleep(100000);  // 100ms delay between retries
+                }
+                dht_result = read_dht_via_kernel(&humidity, &temperature); // Read DHT11 sensor data
+                if (dht_result == 0)
+                {
+                    last_dht_read = now;  // Only update on success
+                    break;  // Success, exit retry loop
+                }
             }
         }
         else
