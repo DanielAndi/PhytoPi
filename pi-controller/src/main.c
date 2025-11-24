@@ -39,8 +39,13 @@ void sync_to_supabase(sqlite3 *db, supabase_config_t *supabase_cfg)
 
     printf("Found %d unsynced readings, syncing to Supabase...\n", count);
 
+    // First, count how many Supabase readings we'll need
+    // temp_hum_data can create 2 readings (humidity + temperature)
+    // So we need at least count * 2 space in worst case
+    int max_supabase_count = count * 2;
+    
     // Convert SQLite readings to Supabase readings
-    supabase_reading_t *supabase_readings = (supabase_reading_t *)malloc(count * sizeof(supabase_reading_t));
+    supabase_reading_t *supabase_readings = (supabase_reading_t *)malloc(max_supabase_count * sizeof(supabase_reading_t));
     if (!supabase_readings)
     {
         fprintf(stderr, "Failed to allocate memory for Supabase readings\n");
@@ -51,11 +56,18 @@ void sync_to_supabase(sqlite3 *db, supabase_config_t *supabase_cfg)
     int supabase_count = 0;
     for (int i = 0; i < count; i++)
     {
+        // Safety check to prevent buffer overflow
+        if (supabase_count >= max_supabase_count)
+        {
+            fprintf(stderr, "Warning: Reached maximum Supabase readings limit, some readings may be skipped\n");
+            break;
+        }
+        
         // Map based on table name
         if (strcmp(readings[i].table_name, "temp_hum_data") == 0)
         {
             // Humidity reading
-            if (humidity_sensor_id)
+            if (humidity_sensor_id && supabase_count < max_supabase_count)
             {
                 supabase_readings[supabase_count].sensor_id = humidity_sensor_id;
                 supabase_readings[supabase_count].value = readings[i].value1;
@@ -65,7 +77,7 @@ void sync_to_supabase(sqlite3 *db, supabase_config_t *supabase_cfg)
                 supabase_count++;
 
                 // Temperature reading
-                if (temperature_sensor_id)
+                if (temperature_sensor_id && supabase_count < max_supabase_count)
                 {
                     supabase_readings[supabase_count].sensor_id = temperature_sensor_id;
                     supabase_readings[supabase_count].value = readings[i].value2;
@@ -78,7 +90,7 @@ void sync_to_supabase(sqlite3 *db, supabase_config_t *supabase_cfg)
         }
         else if (strcmp(readings[i].table_name, "soil_moisture_data") == 0)
         {
-            if (soil_moisture_sensor_id)
+            if (soil_moisture_sensor_id && supabase_count < max_supabase_count)
             {
                 supabase_readings[supabase_count].sensor_id = soil_moisture_sensor_id;
                 supabase_readings[supabase_count].value = readings[i].value1;
@@ -90,7 +102,7 @@ void sync_to_supabase(sqlite3 *db, supabase_config_t *supabase_cfg)
         }
         else if (strcmp(readings[i].table_name, "water_level_data") == 0)
         {
-            if (water_level_sensor_id)
+            if (water_level_sensor_id && supabase_count < max_supabase_count)
             {
                 supabase_readings[supabase_count].sensor_id = water_level_sensor_id;
                 supabase_readings[supabase_count].value = readings[i].value1;
