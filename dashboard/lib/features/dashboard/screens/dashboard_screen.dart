@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:phytopi_dashboard/shared/controllers/smooth_scroll_controller.dart';
 import '../../../core/platform/platform_detector.dart';
 import '../../../core/config/app_config.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -16,6 +17,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Timer? _autoRefreshTimer;
   int _mobileSelectedIndex = 0;
   int _webSelectedIndex = 0;
+  late final ScrollController _mobileScrollController = SmoothScrollController(
+    pointerScrollDuration: const Duration(milliseconds: 260),
+    pointerScrollCurve: Curves.easeOutCubic,
+    pointerScrollMultiplier: 0.34,
+  );
+  late final ScrollController _webScrollController = SmoothScrollController(
+    pointerScrollDuration: const Duration(milliseconds: 260),
+    pointerScrollCurve: Curves.easeOutCubic,
+    pointerScrollMultiplier: 0.34,
+  );
 
   // Theme colors matching landing page
   static const Color _accentColor = Color(0xFF00FF88); // Bright neon green
@@ -38,6 +49,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void dispose() {
     _autoRefreshTimer?.cancel();
+    _mobileScrollController.dispose();
+    _webScrollController.dispose();
     super.dispose();
   }
 
@@ -380,6 +393,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildMobileDashboard(BuildContext context) {
     return SingleChildScrollView(
+      controller: _mobileScrollController,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -806,6 +820,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildWebDashboard(BuildContext context) {
     return SingleChildScrollView(
+      controller: _webScrollController,
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

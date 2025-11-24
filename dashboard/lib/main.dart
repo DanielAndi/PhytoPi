@@ -1,4 +1,5 @@
 import 'dart:ui' show PlatformDispatcher;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -135,6 +136,16 @@ class PhytoPiApp extends StatelessWidget {
         title: AppConfig.appName,
         debugShowCheckedModeBanner: false,
         theme: _buildTheme(),
+        scrollBehavior: const MaterialScrollBehavior().copyWith(
+          physics:
+              const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+          dragDevices: {
+            PointerDeviceKind.touch,
+            PointerDeviceKind.mouse,
+            PointerDeviceKind.stylus,
+            PointerDeviceKind.unknown,
+          },
+        ),
         home: Builder(
           builder: (context) {
             try {
