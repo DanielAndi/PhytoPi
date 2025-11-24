@@ -154,6 +154,11 @@ void sync_to_supabase(sqlite3 *db, supabase_config_t *supabase_cfg)
 int main()
 {
     int fd = i2c_init("/dev/i2c-1"); // You need a FD to read from ADS7830 channels
+    if (fd < 0)
+    {
+        fprintf(stderr, "Warning: I2C bus initialization failed. Soil moisture readings may not work.\n");
+        fprintf(stderr, "To enable I2C: sudo raspi-config -> Interface Options -> I2C -> Enable\n");
+    }
 
     // Initialize GPIO for water level sensor
     gpio_init(WATER_LEVEL_PIN);
@@ -214,15 +219,27 @@ int main()
 
     while (1)
     {
-        soil_moisture = read_ads7830_channel(fd, 0);  // Read soil moisture from A0
+        soil_moisture = (fd >= 0) ? read_ads7830_channel(fd, 0) : -1;  // Read soil moisture from A0
         water_level = gpio_read(WATER_LEVEL_PIN);     // Read water level from GPIO pin
-        read_dht_via_kernel(&humidity, &temperature); // Read DHT11 sensor data
-
-        /* Print statements if you want to see data collected
-        printf("Soil Moisture Level: %d\n", soil_moisture);
-        printf("Water Level: %d\n", water_level);
-        printf("Humidity: %d%%, Temperature: %dC\n", humidity, temperature);
-        */
+        int dht_result = read_dht_via_kernel(&humidity, &temperature); // Read DHT11 sensor data
+        
+        // If DHT11 read failed, set values to -1 to indicate error
+        if (dht_result != 0)
+        {
+            humidity = -1;
+            temperature = -1;
+            if (iteration % 30 == 0) // Print error every 60 seconds
+            {
+                fprintf(stderr, "Warning: DHT11 sensor read failed (check /sys/bus/iio/devices/iio:device0/)\n");
+            }
+        }
+        
+        // Debug output (prints every 30 seconds)
+        if (iteration % 15 == 0) // Print every 30 seconds (15 iterations * 2 seconds)
+        {
+            printf("Sensor readings - Soil: %d, Water: %d, Humidity: %d%%, Temp: %d°C\n", 
+                   soil_moisture, water_level, humidity, temperature);
+        }
 
         int timestamp = (int)time(NULL); // Make one current timestamp for all inserts so they all match
 
