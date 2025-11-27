@@ -123,3 +123,7 @@ node_modules/
 
 # DynamoDB Local files
 .dynamodb/
+
+# OAuth Client Secrets - DO NOT COMMIT
+ClientSecrets/
+dashboard/ClientSecrets/

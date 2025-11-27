@@ -97,16 +97,18 @@ cd "$DASHBOARD_DIR"
 # run_local.sh auto-detects Supabase, but .env can override if needed
 UTILS_DIR="$(cd "$SCRIPT_DIR/../utils" && pwd)"
 if [ -f "$UTILS_DIR/load_env.sh" ]; then
-    # Only load if SUPABASE_URL/KEY not already set from auto-detection
-    # This allows .env to override auto-detection if desired
-    if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+    # Force reload to check for .env overrides
         source "$UTILS_DIR/load_env.sh"
-        # Use .env values if they exist and auto-detection didn't work
+    
+    # Explicitly check if the user has defined SUPABASE_URL in .env
+    # The load_env.sh script exports variables, so we can check them here
         if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
-            API_URL="$SUPABASE_URL"
-            ANON_KEY="$SUPABASE_ANON_KEY"
-            echo "📋 Using Supabase config from .env file"
-        fi
+        # Export to ensure they are available
+        export API_URL="$SUPABASE_URL"
+        export ANON_KEY="$SUPABASE_ANON_KEY"
+        echo "📋 Using Supabase config from .env file:"
+        echo "   URL: $API_URL"
+        echo "   Key: ${ANON_KEY:0:10}..."
     fi
 fi
 

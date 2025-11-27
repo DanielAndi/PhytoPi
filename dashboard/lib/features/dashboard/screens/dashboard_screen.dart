@@ -5,6 +5,13 @@ import 'package:phytopi_dashboard/shared/controllers/smooth_scroll_controller.da
 import '../../../core/platform/platform_detector.dart';
 import '../../../core/config/app_config.dart';
 import '../../auth/providers/auth_provider.dart';
+import 'charts_screen.dart';
+import 'alerts_screen.dart';
+import 'devices_screen.dart';
+import 'ai_health_screen.dart';
+import '../../settings/screens/profile_screen.dart';
+import '../../support/screens/help_support_screen.dart';
+import '../../settings/screens/settings_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -32,10 +39,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   static const Color _accentColor = Color(0xFF00FF88); // Bright neon green
   static const Color _purpleAccent = Color(0xFFFF81FF); // Bright pink/purple
   static const Color _darkPurple = Color(0xFF211F36);
-  static const Color _mutedPurple = Color(0xFF616083);
-  static const Color _darkBackground = Color(0xFF0A0A0A);
   static const Color _lightBackground = Color(0xFF1A1A1A);
-  static const Color _cardBackground = Color(0xFF0C0E1D);
+  static const Color _darkBackground = Color(0xFF0A0A0A);
 
   @override
   void initState() {
@@ -61,7 +66,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         // Refresh data
         setState(() {
           // Trigger rebuild to refresh data
-          // In a real app, you would call a method to refresh data from providers
         });
       },
     );
@@ -74,19 +78,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       
       // Platform-specific rendering
       if (PlatformDetector.isKiosk) {
-        debugPrint('DashboardScreen: Building kiosk layout');
         return _buildKioskLayout(context);
       } else if (PlatformDetector.isMobile) {
-        debugPrint('DashboardScreen: Building mobile layout');
         return _buildMobileLayout(context);
       } else {
-        debugPrint('DashboardScreen: Building web layout');
         return _buildWebLayout(context);
       }
     } catch (e, stack) {
       debugPrint('DashboardScreen: Error in build - $e');
       debugPrint('Stack: $stack');
-      // Return a simple error widget
       return Scaffold(
         body: Center(
           child: Column(
@@ -305,32 +305,82 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
         ),
-        actions: [
-          Consumer<AuthProvider>(
-            builder: (context, authProvider, child) {
-              try {
-                if (authProvider.isAuthenticated) {
-                  return IconButton(
-                    icon: Container(
-                      padding: const EdgeInsets.all(8),
+        // No actions needed here as we have a Drawer now
+      ),
+      drawer: Drawer(
+        backgroundColor: _lightBackground,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            DrawerHeader(
                       decoration: BoxDecoration(
-                        color: _accentColor.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(Icons.person, color: _accentColor),
+                color: _darkBackground,
+                border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.1))),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.eco, color: _accentColor, size: 48),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'PhytoPi Menu',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
                     ),
-                    onPressed: () {
-                      _showMobileMenu(context, authProvider);
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.person, color: Colors.white),
+              title: const Text('Profile', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
+              },
+                      ),
+            ListTile(
+              leading: const Icon(Icons.health_and_safety, color: _accentColor),
+              title: const Text('AI Health (Shortcut)', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                 // Using shortcut to go to AI Health Screen directly
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const AiHealthScreen()));
                     },
-                  );
-                }
-              } catch (e) {
-                debugPrint('Error in mobile auth consumer: $e');
-              }
-              return const SizedBox.shrink();
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings, color: Colors.white),
+              title: const Text('Settings', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.help_outline, color: Colors.white),
+              title: const Text('Help & Support', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const HelpSupportScreen()));
+              },
+            ),
+            const Divider(color: Colors.grey),
+            Consumer<AuthProvider>(
+              builder: (context, authProvider, child) {
+                return ListTile(
+                  leading: const Icon(Icons.logout, color: Colors.red),
+                  title: const Text('Logout', style: TextStyle(color: Colors.red)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    authProvider.signOut();
+                  },
+                );
             },
           ),
         ],
+        ),
       ),
       body: Container(
         decoration: BoxDecoration(
@@ -347,8 +397,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           index: _mobileSelectedIndex,
           children: [
             _buildMobileDashboard(context),
-            _buildMobileDevices(context),
-            _buildMobileSettings(context),
+            const DevicesScreen(),
+            const ChartsScreen(),
+            const AlertsScreen(),
           ],
         ),
       ),
@@ -367,6 +418,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           selectedItemColor: _accentColor,
           unselectedItemColor: Colors.white.withOpacity(0.6),
           currentIndex: _mobileSelectedIndex,
+          type: BottomNavigationBarType.fixed, // Needed for 4+ items
           onTap: (index) {
             setState(() {
               _mobileSelectedIndex = index;
@@ -382,8 +434,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               label: 'Devices',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.settings),
-              label: 'Settings',
+              icon: Icon(Icons.bar_chart),
+              label: 'Charts',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.notifications),
+              label: 'Alerts',
             ),
           ],
         ),
@@ -574,102 +630,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildMobileDevices(BuildContext context) {
-    return Center(
-      child: Text(
-        'Devices Screen',
-        style: TextStyle(
-          color: Colors.white.withOpacity(0.7),
-          fontSize: 18,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMobileSettings(BuildContext context) {
-    return Center(
-      child: Text(
-        'Settings Screen',
-        style: TextStyle(
-          color: Colors.white.withOpacity(0.7),
-          fontSize: 18,
-        ),
-      ),
-    );
-  }
-
-  void _showMobileMenu(BuildContext context, AuthProvider authProvider) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: _lightBackground,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 12),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: _accentColor.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.person, color: _accentColor),
-              ),
-              title: const Text('Profile', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                // Navigate to profile
-              },
-            ),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: _purpleAccent.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.settings, color: _purpleAccent),
-              ),
-              title: const Text('Settings', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                // Navigate to settings
-              },
-            ),
-            ListTile(
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.logout, color: Colors.red),
-              ),
-              title: const Text('Logout', style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                authProvider.signOut();
-              },
-            ),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// Web-specific layout: sidebar navigation, multi-column
   Widget _buildWebLayout(BuildContext context) {
     return Scaffold(
@@ -708,9 +668,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         if (value == 'logout') {
                           authProvider.signOut();
                         } else if (value == 'profile') {
-                          // Navigate to profile
+                           Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
                         } else if (value == 'settings') {
-                          // Navigate to settings
+                           Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
                         }
                       } catch (e) {
                         debugPrint('Error in menu action: $e');
@@ -790,9 +750,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     label: Text('Devices'),
                   ),
                   NavigationRailDestination(
-                    icon: Icon(Icons.analytics_outlined),
-                    selectedIcon: Icon(Icons.analytics),
-                    label: Text('Analytics'),
+                    icon: Icon(Icons.bar_chart_outlined),
+                    selectedIcon: Icon(Icons.bar_chart),
+                    label: Text('Charts'),
+                  ),
+                  NavigationRailDestination(
+                     icon: Icon(Icons.notifications_outlined),
+                    selectedIcon: Icon(Icons.notifications),
+                    label: Text('Alerts'),
                   ),
                 ],
               ),
@@ -807,8 +772,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 index: _webSelectedIndex,
                 children: [
                   _buildWebDashboard(context),
-                  _buildWebDevices(context),
-                  _buildWebAnalytics(context),
+                  const DevicesScreen(),
+                  const ChartsScreen(),
+                  const AlertsScreen(),
                 ],
               ),
             ),
@@ -966,30 +932,4 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
-
-  Widget _buildWebDevices(BuildContext context) {
-    return Center(
-      child: Text(
-        'Devices Screen',
-        style: TextStyle(
-          color: Colors.white.withOpacity(0.7),
-          fontSize: 18,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildWebAnalytics(BuildContext context) {
-    return Center(
-      child: Text(
-        'Analytics Screen',
-        style: TextStyle(
-          color: Colors.white.withOpacity(0.7),
-          fontSize: 18,
-        ),
-      ),
-    );
-  }
 }
-
-

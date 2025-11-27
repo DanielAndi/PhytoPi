@@ -350,6 +350,15 @@ if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
     exit 1
 fi
 
+# Explicitly export variables for Dart defines
+export SUPABASE_URL="$SUPABASE_URL"
+export SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+
+echo "📋 Using Supabase config:"
+echo "   URL: $SUPABASE_URL"
+echo "   Key: ${SUPABASE_ANON_KEY:0:10}..."
+echo ""
+
 # Check Flutter
 echo "🔍 Checking Flutter..."
 if ! command -v flutter &> /dev/null; then

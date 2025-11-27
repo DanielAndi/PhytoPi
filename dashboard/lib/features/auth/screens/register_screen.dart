@@ -3,32 +3,76 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/theme_controller.dart';
 import '../providers/auth_provider.dart';
-import 'register_screen.dart';
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+class RegisterScreen extends StatefulWidget {
+  const RegisterScreen({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<RegisterScreen> createState() => _RegisterScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
-  bool _rememberMe = false;
-  final _usernameController = TextEditingController(); // Used as email/username
+class _RegisterScreenState extends State<RegisterScreen> {
+  final _usernameController = TextEditingController();
+  final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-
+  final _confirmPasswordController = TextEditingController();
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+  
   @override
   void dispose() {
     _usernameController.dispose();
+    _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleRegister() async {
+    if (_passwordController.text != _confirmPasswordController.text) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Passwords do not match')),
+      );
+      return;
+    }
+
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+       ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill in all fields')),
+      );
+      return;
+    }
+
+    final authProvider = context.read<AuthProvider>();
+    await authProvider.signUp(_emailController.text, _passwordController.text);
+    
+    if (mounted && authProvider.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(authProvider.error!)),
+      );
+    } else if (mounted) {
+       ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registration successful! Please check your email for confirmation.')),
+      );
+       Navigator.pop(context);
+    }
+  }
+
+  Future<void> _handleSocialAuth(OAuthProvider provider) async {
+    final authProvider = context.read<AuthProvider>();
+    await authProvider.signInWithOAuth(provider);
+     if (mounted && authProvider.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(authProvider.error!)),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final themeController = context.watch<ThemeController>();
-    final authProvider = context.watch<AuthProvider>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final authProvider = context.watch<AuthProvider>();
 
     return Scaffold(
       body: SafeArea(
@@ -59,19 +103,19 @@ class _LoginScreenState extends State<LoginScreen> {
                     const Text(
                       'PhytoPi',
                       style: TextStyle(
-                        fontFamily: 'Cursive', // Placeholder for the script font in image
+                        fontFamily: 'Cursive', 
                         fontSize: 48,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 16),
                     const Icon(
-                      Icons.eco, // Placeholder for the plant/gear logo
+                      Icons.eco,
                       size: 64,
                     ),
-                    const SizedBox(height: 48),
+                    const SizedBox(height: 32),
                     
-                    // Login Card
+                    // Register Card
                     Container(
                       constraints: const BoxConstraints(maxWidth: 400),
                       padding: const EdgeInsets.all(24),
@@ -94,7 +138,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           const Text(
-                            'Login',
+                            'Create Account',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 20,
@@ -102,99 +146,76 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                           const SizedBox(height: 24),
-                          
-                          if (authProvider.error != null)
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              margin: const EdgeInsets.only(bottom: 16),
-                              decoration: BoxDecoration(
-                                color: Colors.red.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.red.withOpacity(0.3)),
-                              ),
-                              child: Text(
-                                authProvider.error!,
-                                style: const TextStyle(color: Colors.red),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
 
                           // Username Field
                           TextField(
                             controller: _usernameController,
                             decoration: const InputDecoration(
+                              hintText: 'Username',
+                              suffixIcon: Icon(Icons.person_outline),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Email Field
+                          TextField(
+                            controller: _emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            decoration: const InputDecoration(
                               hintText: 'Email',
                               suffixIcon: Icon(Icons.email_outlined),
                             ),
-                            keyboardType: TextInputType.emailAddress,
                           ),
                           const SizedBox(height: 16),
                           
                           // Password Field
                           TextField(
                             controller: _passwordController,
-                            obscureText: true,
-                            decoration: const InputDecoration(
+                            obscureText: _obscurePassword,
+                            decoration: InputDecoration(
                               hintText: 'Password',
-                              suffixIcon: Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                icon: Icon(_obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                                onPressed: () {
+                                  setState(() {
+                                    _obscurePassword = !_obscurePassword;
+                                  });
+                                },
+                          ),
                             ),
                           ),
                           const SizedBox(height: 16),
-                          
-                          // Remember Me & Forgot Password
-                          Row(
-                            children: [
-                              SizedBox(
-                                height: 24,
-                                width: 24,
-                                child: Checkbox(
-                                  value: _rememberMe,
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _rememberMe = value ?? false;
-                                    });
-                                  },
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                ),
+
+                          // Confirm Password Field
+                          TextField(
+                            controller: _confirmPasswordController,
+                            obscureText: _obscureConfirmPassword,
+                            decoration: InputDecoration(
+                              hintText: 'Confirm Password',
+                              suffixIcon: IconButton(
+                                icon: Icon(_obscureConfirmPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                                onPressed: () {
+                                  setState(() {
+                                    _obscureConfirmPassword = !_obscureConfirmPassword;
+                                  });
+                                },
                               ),
-                              const SizedBox(width: 8),
-                              const Text('Remember me'),
-                              const Spacer(),
-                              TextButton(
-                                onPressed: () {},
-                                style: TextButton.styleFrom(
-                                  padding: EdgeInsets.zero,
-                                  minimumSize: Size.zero,
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                  foregroundColor: Colors.grey,
-                                ),
-                                child: const Text('Forgot password?'),
-                              ),
-                            ],
+                            ),
                           ),
+                          
                           const SizedBox(height: 24),
                           
-                          // Login Button
+                          // Register Button
                           ElevatedButton(
-                            onPressed: authProvider.isLoading ? null : () {
-                              if (_usernameController.text.isEmpty || _passwordController.text.isEmpty) {
-                                return;
-                              }
-                              authProvider.signIn(
-                                _usernameController.text,
-                                _passwordController.text,
-                              );
-                            },
+                            onPressed: authProvider.isLoading ? null : _handleRegister,
                             child: authProvider.isLoading
                               ? const SizedBox(
                                   height: 20,
                                   width: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(strokeWidth: 2)
                                 )
                               : const Text(
-                                  'Login',
+                                  'Register',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 16,
@@ -202,11 +223,11 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                           ),
                           
-                          const SizedBox(height: 32),
+                          const SizedBox(height: 24),
                           
                           // Social Login
                           const Text(
-                            'Or Sign In Using',
+                            'Or Sign Up Using',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: Colors.grey,
@@ -219,45 +240,40 @@ class _LoginScreenState extends State<LoginScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               _buildSocialButton(
-                                onTap: () => authProvider.signInWithOAuth(OAuthProvider.twitter),
-                                child: const Icon(Icons.close, size: 20), // X icon
-                                color: const Color(0xFF333333),
+                                onTap: () => _handleSocialAuth(OAuthProvider.twitter),
+                                child: const Icon(Icons.close, size: 20, color: Colors.white), // X icon (Twitter)
+                                color: const Color(0xFF000000), // X uses black
                               ),
                               const SizedBox(width: 16),
                               _buildSocialButton(
-                                onTap: () => authProvider.signInWithOAuth(OAuthProvider.facebook),
+                                onTap: () => _handleSocialAuth(OAuthProvider.facebook),
                                 child: const Icon(Icons.facebook, color: Colors.white, size: 24),
                                 color: const Color(0xFF1877F2),
                               ),
                               const SizedBox(width: 16),
                               _buildSocialButton(
-                                onTap: () => authProvider.signInWithOAuth(OAuthProvider.google),
-                                child: const Icon(Icons.g_mobiledata, color: Colors.white, size: 32),
-                                gradient: const LinearGradient(
-                                  colors: [Color(0xFFDB4437), Color(0xFF4285F4)],
-                                ),
+                                onTap: () => _handleSocialAuth(OAuthProvider.google),
+                                child: const Icon(Icons.g_mobiledata, color: Colors.white, size: 32), // Placeholder for Google G
+                                color: const Color(0xFFDB4437),
                               ),
                             ],
                           ),
                           
                           const SizedBox(height: 24),
                           
-                          // Register Link
+                          // Login Link
                           Column(
                             children: [
                               const Text(
-                                'Or',
+                                'Already have an account?',
                                 style: TextStyle(color: Colors.grey),
                               ),
                               TextButton(
                                 onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(builder: (context) => const RegisterScreen()),
-                                  );
+                                  Navigator.pop(context);
                                 },
                                 child: const Text(
-                                  'Register',
+                                  'Login',
                                   style: TextStyle(
                                     decoration: TextDecoration.underline,
                                     fontWeight: FontWeight.bold,
@@ -308,4 +324,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-

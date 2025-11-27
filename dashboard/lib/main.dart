@@ -42,6 +42,11 @@ void main() async {
   
   // Initialize Supabase with error handling
   try {
+    // Debug: Print Supabase config to console
+    debugPrint('Supabase Config Check:');
+    debugPrint('URL: ${AppConfig.supabaseUrl.isEmpty ? 'EMPTY' : AppConfig.supabaseUrl}');
+    debugPrint('Key: ${AppConfig.supabaseAnonKey.isEmpty ? 'EMPTY' : (AppConfig.supabaseAnonKey == 'your-anon-key-here' ? 'DEFAULT' : 'CONFIGURED')}');
+
     // Only initialize if we have valid-looking credentials
     if (AppConfig.supabaseUrl.isNotEmpty && 
         AppConfig.supabaseAnonKey.isNotEmpty &&
@@ -49,6 +54,10 @@ void main() async {
       await Supabase.initialize(
         url: AppConfig.supabaseUrl,
         anonKey: AppConfig.supabaseAnonKey,
+        authOptions: const FlutterAuthClientOptions(
+          authFlowType: AuthFlowType.pkce,
+        ),
+        debug: true,
       );
       SupabaseConfig.markAsInitialized();
       debugPrint('Supabase initialized successfully');
@@ -154,55 +163,51 @@ class PhytoPiApp extends StatelessWidget {
                 PointerDeviceKind.unknown,
               },
             ),
-            home: Builder(
-              builder: (context) {
-                try {
-                  // Show landing page for web, dashboard for kiosk/mobile
-                  // Landing page allows navigation to dashboard
-                  if (PlatformDetector.isWeb) {
-                    return const LandingPageScreen();
-                  } else if (PlatformDetector.isKiosk) {
-                    // Kiosk mode: show dashboard directly
-                    return const PlatformWrapper(
-                      child: DashboardScreen(),
-                    );
-                  } else {
-                    // Mobile: show LoginScreen
-                    return const LoginScreen();
-                  }
-                } catch (e, stack) {
-                  debugPrint('Error building initial screen: $e');
-                  debugPrint('Stack: $stack');
-                  return Scaffold(
-                    body: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.error, size: 48, color: Colors.red),
-                          const SizedBox(height: 16),
-                          Text('Error loading app: $e'),
-                        ],
-                      ),
-                    ),
-                  );
-                }
+            home: Consumer<AuthProvider>(
+              builder: (context, authProvider, _) {
+                return Builder(
+                  builder: (context) {
+                    try {
+                      // If user is authenticated, show dashboard
+                      if (authProvider.isAuthenticated) {
+                        return const PlatformWrapper(
+                          child: DashboardScreen(),
+                        );
+                      }
+
+                      // Show landing page for web, dashboard for kiosk/mobile
+                      // Landing page allows navigation to dashboard
+                      if (PlatformDetector.isWeb) {
+                        return const LandingPageScreen();
+                      } else if (PlatformDetector.isKiosk) {
+                        // Kiosk mode: show dashboard directly (should be covered by auth check ideally)
+                        return const PlatformWrapper(
+                          child: DashboardScreen(),
+                        );
+                      } else {
+                        // Mobile: show LoginScreen
+                        return const LoginScreen();
+                      }
+                    } catch (e, stack) {
+                      debugPrint('Error building initial screen: $e');
+                      debugPrint('Stack: $stack');
+                      return Scaffold(
+                        body: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.error, size: 48, color: Colors.red),
+                              const SizedBox(height: 16),
+                              Text('Error loading app: $e'),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                  },
+                );
               },
             ),
-            // Disable back button in kiosk mode
-            builder: (context, child) {
-              try {
-                if (PlatformDetector.isKiosk && !AppConfig.enableBackButton) {
-                  return PopScope(
-                    canPop: false,
-                    child: child!,
-                  );
-                }
-                return child!;
-              } catch (e) {
-                debugPrint('Error in builder: $e');
-                return child!;
-              }
-            },
           );
         },
       ),

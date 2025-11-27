@@ -2,14 +2,16 @@ import '../platform/platform_detector.dart';
 
 class AppConfig {
   // Supabase Configuration
+  // If using String.fromEnvironment without const, it might pick up runtime changes, 
+  // but usually environment variables need to be passed at compile/launch time via --dart-define
   static const String supabaseUrl = String.fromEnvironment(
     'SUPABASE_URL',
-    defaultValue: 'http://localhost:54321',
+    defaultValue: '', // Empty default to force check
   );
   
   static const String supabaseAnonKey = String.fromEnvironment(
     'SUPABASE_ANON_KEY',
-    defaultValue: 'your-anon-key-here',
+    defaultValue: '', // Empty default to force check
   );
   
   // App Configuration - Platform-specific
