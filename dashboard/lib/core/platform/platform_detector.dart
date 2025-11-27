@@ -54,6 +54,9 @@ class PlatformDetector {
   static bool get isWeb => kIsWeb;
   
   static bool get isMobile {
+    // Allow forcing mobile layout for testing on desktop/web
+    if (const bool.fromEnvironment('FORCE_MOBILE')) return true;
+
     if (kIsWeb) return false;
     try {
       return _isMobileNative();

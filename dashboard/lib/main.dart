@@ -8,7 +8,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/config/app_config.dart';
 import 'core/config/supabase_config.dart';
 import 'core/platform/platform_detector.dart';
+import 'core/theme/app_theme.dart';
+import 'core/theme/theme_controller.dart';
 import 'features/auth/providers/auth_provider.dart';
+import 'features/auth/screens/login_screen.dart';
 import 'features/dashboard/screens/dashboard_screen.dart';
 import 'features/marketing/screens/landing_page_screen.dart';
 import 'shared/widgets/platform_wrapper.dart';
@@ -119,6 +122,7 @@ class PhytoPiApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => ThemeController()),
         ChangeNotifierProvider(
           create: (_) {
             try {
@@ -132,101 +136,76 @@ class PhytoPiApp extends StatelessWidget {
           },
         ),
       ],
-      child: MaterialApp(
-        title: AppConfig.appName,
-        debugShowCheckedModeBanner: false,
-        theme: _buildTheme(),
-        scrollBehavior: const MaterialScrollBehavior().copyWith(
-          physics:
-              const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-          dragDevices: {
-            PointerDeviceKind.touch,
-            PointerDeviceKind.mouse,
-            PointerDeviceKind.stylus,
-            PointerDeviceKind.unknown,
-          },
-        ),
-        home: Builder(
-          builder: (context) {
-            try {
-              // Show landing page for web, dashboard for kiosk/mobile
-              // Landing page allows navigation to dashboard
-              if (PlatformDetector.isWeb) {
-                return const LandingPageScreen();
-              } else if (PlatformDetector.isKiosk) {
-                // Kiosk mode: show dashboard directly
-                return const PlatformWrapper(
-                  child: DashboardScreen(),
-                );
-              } else {
-                // Mobile: show landing page (can navigate to dashboard)
-                return const LandingPageScreen();
+      child: Consumer<ThemeController>(
+        builder: (context, themeController, _) {
+          return MaterialApp(
+            title: AppConfig.appName,
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: themeController.themeMode,
+            scrollBehavior: const MaterialScrollBehavior().copyWith(
+              physics:
+                  const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+              dragDevices: {
+                PointerDeviceKind.touch,
+                PointerDeviceKind.mouse,
+                PointerDeviceKind.stylus,
+                PointerDeviceKind.unknown,
+              },
+            ),
+            home: Builder(
+              builder: (context) {
+                try {
+                  // Show landing page for web, dashboard for kiosk/mobile
+                  // Landing page allows navigation to dashboard
+                  if (PlatformDetector.isWeb) {
+                    return const LandingPageScreen();
+                  } else if (PlatformDetector.isKiosk) {
+                    // Kiosk mode: show dashboard directly
+                    return const PlatformWrapper(
+                      child: DashboardScreen(),
+                    );
+                  } else {
+                    // Mobile: show LoginScreen
+                    return const LoginScreen();
+                  }
+                } catch (e, stack) {
+                  debugPrint('Error building initial screen: $e');
+                  debugPrint('Stack: $stack');
+                  return Scaffold(
+                    body: Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.error, size: 48, color: Colors.red),
+                          const SizedBox(height: 16),
+                          Text('Error loading app: $e'),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+              },
+            ),
+            // Disable back button in kiosk mode
+            builder: (context, child) {
+              try {
+                if (PlatformDetector.isKiosk && !AppConfig.enableBackButton) {
+                  return PopScope(
+                    canPop: false,
+                    child: child!,
+                  );
+                }
+                return child!;
+              } catch (e) {
+                debugPrint('Error in builder: $e');
+                return child!;
               }
-            } catch (e, stack) {
-              debugPrint('Error building initial screen: $e');
-              debugPrint('Stack: $stack');
-              return Scaffold(
-                body: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.error, size: 48, color: Colors.red),
-                      const SizedBox(height: 16),
-                      Text('Error loading app: $e'),
-                    ],
-                  ),
-                ),
-              );
-            }
-          },
-        ),
-        // Disable back button in kiosk mode
-        builder: (context, child) {
-          try {
-            if (PlatformDetector.isKiosk && !AppConfig.enableBackButton) {
-              return PopScope(
-                canPop: false,
-                child: child!,
-              );
-            }
-            return child!;
-          } catch (e) {
-            debugPrint('Error in builder: $e');
-            return child!;
-          }
+            },
+          );
         },
       ),
     );
-  }
-
-  /// Build platform-specific theme
-  ThemeData _buildTheme() {
-    final baseTheme = ThemeData(
-      primarySwatch: Colors.green,
-      primaryColor: const Color(0xFF2E7D32),
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xFF2E7D32),
-        brightness: Brightness.light,
-      ),
-      useMaterial3: true,
-    );
-
-    // Platform-specific theme adjustments
-    if (PlatformDetector.isKiosk) {
-      return baseTheme.copyWith(
-        // Larger text for kiosk viewing distance
-        textTheme: baseTheme.textTheme.apply(fontSizeFactor: 1.2),
-        // High contrast for better visibility
-        brightness: Brightness.light,
-      );
-    } else if (PlatformDetector.isMobile) {
-      return baseTheme.copyWith(
-        // Mobile-optimized theme
-        textTheme: baseTheme.textTheme,
-      );
-    }
-    
-    // Web/Desktop theme
-    return baseTheme;
   }
 }
