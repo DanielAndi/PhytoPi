@@ -5,9 +5,23 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <math.h>
 
-#define SYNC_INTERVAL 5   // Sync to Supabase every 5 seconds
-#define BATCH_SIZE 50     // Maximum readings per batch
+#define SYNC_INTERVAL 5       // Sync to Supabase every 5 seconds
+#define BATCH_SIZE 50         // Maximum readings per batch
+#define DATA_READ_INTERVAL 2  // Read sensors every 2 seconds
+
+// Deadband Thresholds
+// Only record if value changes by more than this amount
+#define THRESH_TEMP 1         // 1 degree C
+#define THRESH_HUM 2          // 2 percent
+#define THRESH_SOIL 5         // 5 raw units (approx 2%)
+#define THRESH_WATER 5        // 5 raw units
+#define THRESH_LIGHT 10       // 10 raw units
+
+// Heartbeat
+// Force a recording every X seconds even if values haven't changed
+#define HEARTBEAT_INTERVAL 300 // 5 minutes
 
 // Sensor ID mapping - these should match your Supabase sensors table
 // Set via environment variables: SUPABASE_HUMIDITY_SENSOR_ID, etc.
@@ -173,16 +187,24 @@ int main()
         fprintf(stderr, "To enable I2C: sudo raspi-config -> Interface Options -> I2C -> Enable\n");
     }
 
-    // Initialize GPIO for water level sensor
-    // gpio_init(WATER_LEVEL_PIN);
-    // gpio_config_input(WATER_LEVEL_PIN);
-
     // Variables to hold sensor data
     int humidity = -1;      // Initialize to -1 (error state)
     int temperature = -1;   // Initialize to -1 (error state)
     int soil_moisture = 0;
     int water_level = 0;
     int light_level = 0;
+
+    // State variables for Deadband/Heartbeat logic
+    int last_humidity = -999;
+    int last_temperature = -999;
+    int last_soil_moisture = -999;
+    int last_water_level = -999;
+    int last_light_level = -999;
+
+    time_t last_env_ts = 0;   // Last time temp/humidity was sent
+    time_t last_soil_ts = 0;  // Last time soil moisture was sent
+    time_t last_water_ts = 0; // Last time water level was sent
+    time_t last_light_ts = 0; // Last time light level was sent
 
     // Initialize the database
     sqlite3 *db = db_init("sensor_data.db");
@@ -234,6 +256,8 @@ int main()
     time_t last_dht_read = 0;  // Track last DHT11 read time (needs 2+ second cooldown)
     int iteration = 0;
 
+    printf("Starting sensor loop (Interval: %ds, Heartbeat: %ds)\n", DATA_READ_INTERVAL, HEARTBEAT_INTERVAL);
+
     while (1)
     {
         soil_moisture = (fd >= 0) ? read_ads7830_channel(fd, 0) : -1;  // Read soil moisture from A0
@@ -271,8 +295,9 @@ int main()
         // If DHT11 read failed (and wasn't skipped), set values to -1 to indicate error
         if (!dht_skipped && dht_result != 0)
         {
-            humidity = -1;
-            temperature = -1;
+            // Keep old values if read failed, but mark as error if it persists
+            // For now, we'll just log it and not update 'humidity'/'temperature' variables
+            // so they retain their last valid (or initial -1) state.
             
             const char *error_msg = "Unknown error";
             switch (dht_result)
@@ -285,34 +310,80 @@ int main()
                 case -6: error_msg = "Data read timeout (low)"; break;
                 case -7: error_msg = "Checksum mismatch"; break;
             }
-            fprintf(stderr, "Warning: DHT11 sensor read failed (error: %d - %s). Check GPIO pin %d connection and wiring.\n", 
-                    dht_result, error_msg, DHT22_PIN);
+            // Only print error every 10 iterations to reduce log spam
+            if (iteration % 10 == 0) {
+                fprintf(stderr, "Warning: DHT11 sensor read failed (error: %d - %s)\n", dht_result, error_msg);
+            }
         }
         
-        // Debug output (always print)
+        // Debug output (always print current state)
         const char *water_status = (water_level >= 5) ? "HAS WATER" : "NO WATER";
-        printf("Sensor readings - Soil: %d, Water Level: %d (%s), Light: %d, Humidity: %d%%, Temp: %d°C\n", 
-               soil_moisture, water_level, water_status, light_level, humidity, temperature);
+        printf("[%ld] Readings: Soil=%d, Water=%d, Light=%d, Hum=%d%%, Temp=%dC\n", 
+               now, soil_moisture, water_level, light_level, humidity, temperature);
 
-        int timestamp = (int)time(NULL); // Make one current timestamp for all inserts so they all match
+        int timestamp = (int)now;
 
-        // Insert data into the database
-        if ((sql_execute_insert(db, sql_dht11, humidity, temperature, timestamp) != SQLITE_OK) ||
-            (sql_execute_insert(db, sql_soil_moisture, soil_moisture, 0, timestamp) != SQLITE_OK) ||
-            (sql_execute_insert(db, sql_water_level, water_level, 0, timestamp) != SQLITE_OK) ||
-            (sql_execute_insert(db, sql_light_level, light_level, 0, timestamp) != SQLITE_OK))
-        {
-            fprintf(stderr, "Failed to insert data into database.\n");
+        // --- Deadband Logic ---
+
+        // 1. Check Environment (Temp/Humidity)
+        // Only update if valid reading AND (changed significantly OR heartbeat expired)
+        if (dht_result == 0 && humidity != -1 && temperature != -1) {
+            if (abs(humidity - last_humidity) >= THRESH_HUM || 
+                abs(temperature - last_temperature) >= THRESH_TEMP ||
+                (now - last_env_ts) >= HEARTBEAT_INTERVAL)
+            {
+                if (sql_execute_insert(db, sql_dht11, humidity, temperature, timestamp) == SQLITE_OK) {
+                    printf("  -> Saved Temp/Hum (Hum: %d->%d, Temp: %d->%d)\n", 
+                           last_humidity, humidity, last_temperature, temperature);
+                    last_humidity = humidity;
+                    last_temperature = temperature;
+                    last_env_ts = now;
+                }
+            }
         }
-        else
-        {
-            printf("Data inserted successfully into database.\n");
+
+        // 2. Check Soil Moisture
+        if (soil_moisture != -1) {
+            if (abs(soil_moisture - last_soil_moisture) >= THRESH_SOIL ||
+                (now - last_soil_ts) >= HEARTBEAT_INTERVAL)
+            {
+                if (sql_execute_insert(db, sql_soil_moisture, soil_moisture, 0, timestamp) == SQLITE_OK) {
+                    printf("  -> Saved Soil (Val: %d->%d)\n", last_soil_moisture, soil_moisture);
+                    last_soil_moisture = soil_moisture;
+                    last_soil_ts = now;
+                }
+            }
+        }
+
+        // 3. Check Water Level
+        if (water_level != -1) {
+            if (abs(water_level - last_water_level) >= THRESH_WATER ||
+                (now - last_water_ts) >= HEARTBEAT_INTERVAL)
+            {
+                if (sql_execute_insert(db, sql_water_level, water_level, 0, timestamp) == SQLITE_OK) {
+                    printf("  -> Saved Water (Val: %d->%d)\n", last_water_level, water_level);
+                    last_water_level = water_level;
+                    last_water_ts = now;
+                }
+            }
+        }
+
+        // 4. Check Light Level
+        if (light_level != -1) {
+            if (abs(light_level - last_light_level) >= THRESH_LIGHT ||
+                (now - last_light_ts) >= HEARTBEAT_INTERVAL)
+            {
+                if (sql_execute_insert(db, sql_light_level, light_level, 0, timestamp) == SQLITE_OK) {
+                    printf("  -> Saved Light (Val: %d->%d)\n", last_light_level, light_level);
+                    last_light_level = light_level;
+                    last_light_ts = now;
+                }
+            }
         }
 
         // Sync to Supabase periodically
         if (supabase_enabled)
         {
-            time_t now = time(NULL);
             if (now - last_sync >= SYNC_INTERVAL)
             {
                 sync_to_supabase(db, &supabase_cfg);
