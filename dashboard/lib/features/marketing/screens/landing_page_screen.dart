@@ -7,6 +7,9 @@ import 'package:phytopi_dashboard/shared/controllers/smooth_scroll_controller.da
 import '../../dashboard/screens/dashboard_screen.dart';
 import '../models/landing_models.dart';
 import 'category_detail_screen.dart';
+import 'package:provider/provider.dart';
+import '../../auth/providers/auth_provider.dart';
+import '../../auth/screens/login_screen.dart';
 
 /// Landing page with dark hero section that gradually lightens on scroll
 /// Inspired by modern tech/DeFi landing pages with e-commerce functionality
@@ -523,11 +526,13 @@ class _LandingPageScreenState extends State<LandingPageScreen> {
   @override
   void initState() {
     super.initState();
+    debugPrint('LandingPageScreen: initState');
     _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
+    debugPrint('LandingPageScreen: dispose');
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _megaMenuTimer?.cancel();
@@ -685,6 +690,10 @@ class _LandingPageScreenState extends State<LandingPageScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Watch auth provider to rebuild on auth state changes
+    context.watch<AuthProvider>();
+    debugPrint('LandingPageScreen: build');
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: Stack(
@@ -941,67 +950,79 @@ class _LandingPageScreenState extends State<LandingPageScreen> {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         const SnackBar(content: Text('Settings page coming soon!')),
                                       );
-                                    } else if (value == 'logout') {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Logout functionality coming soon!')),
+                                    } else if (value == 'login') {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => const LoginScreen(),
+                                        ),
                                       );
+                                    } else if (value == 'logout') {
+                                      context.read<AuthProvider>().signOut();
                                     }
                                   },
-                                  itemBuilder: (BuildContext context) => [
-                                    const PopupMenuItem<String>(
-                                      value: 'dashboard',
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.dashboard, size: 20, color: Colors.white),
-                                          SizedBox(width: 12),
-                                          Text(
-                                            'Dashboard',
-                                            style: TextStyle(color: Colors.white),
+                                  itemBuilder: (BuildContext context) {
+                                    final authProvider = context.read<AuthProvider>();
+                                    final isAuthenticated = authProvider.isAuthenticated;
+
+                                    return [
+                                      if (isAuthenticated) ...[
+                                        const PopupMenuItem<String>(
+                                          value: 'dashboard',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.dashboard, size: 20, color: Colors.white),
+                                              SizedBox(width: 12),
+                                              Text(
+                                                'Dashboard',
+                                                style: TextStyle(color: Colors.white),
+                                              ),
+                                            ],
                                           ),
-                                        ],
-                                      ),
-                                    ),
-                                    const PopupMenuItem<String>(
-                                      value: 'profile',
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.person, size: 20, color: Colors.white),
-                                          SizedBox(width: 12),
-                                          Text(
-                                            'Profile',
-                                            style: TextStyle(color: Colors.white),
+                                        ),
+                                        const PopupMenuItem<String>(
+                                          value: 'profile',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.person, size: 20, color: Colors.white),
+                                              SizedBox(width: 12),
+                                              Text(
+                                                'Profile',
+                                                style: TextStyle(color: Colors.white),
+                                              ),
+                                            ],
                                           ),
-                                        ],
-                                      ),
-                                    ),
-                                    const PopupMenuItem<String>(
-                                      value: 'settings',
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.settings, size: 20, color: Colors.white),
-                                          SizedBox(width: 12),
-                                          Text(
-                                            'Settings',
-                                            style: TextStyle(color: Colors.white),
+                                        ),
+                                        const PopupMenuItem<String>(
+                                          value: 'settings',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.settings, size: 20, color: Colors.white),
+                                              SizedBox(width: 12),
+                                              Text(
+                                                'Settings',
+                                                style: TextStyle(color: Colors.white),
+                                              ),
+                                            ],
                                           ),
-                                        ],
+                                        ),
+                                        const PopupMenuDivider(),
+                                      ],
+                                      PopupMenuItem<String>(
+                                        value: isAuthenticated ? 'logout' : 'login',
+                                        child: Row(
+                                          children: [
+                                            Icon(isAuthenticated ? Icons.logout : Icons.login, size: 20, color: Colors.white),
+                                            const SizedBox(width: 12),
+                                            Text(
+                                              isAuthenticated ? 'Logout' : 'Login',
+                                              style: const TextStyle(color: Colors.white),
+                                            ),
+                                          ],
+                                        ),
                                       ),
-                                    ),
-                                    const PopupMenuDivider(),
-                                    const PopupMenuItem<String>(
-                                      value: 'logout',
-                                      child: Row(
-                                        children: [
-                                          Icon(Icons.logout, size: 20, color: Colors.white),
-                                          SizedBox(width: 12),
-                                          Text(
-                                            'Logout',
-                                            style: TextStyle(color: Colors.white),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
+                                    ];
+                                  },
                                 ),
                                 const SizedBox(width: 8),
                                 

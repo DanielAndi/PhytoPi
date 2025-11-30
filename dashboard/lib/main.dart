@@ -1,4 +1,5 @@
-import 'dart:ui' show PlatformDispatcher;
+import 'dart:async';
+import 'dart:ui' show PlatformDispatcher, PointerDeviceKind; // Import PlatformDispatcher explicitly
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,7 +17,7 @@ import 'features/dashboard/screens/dashboard_screen.dart';
 import 'features/marketing/screens/landing_page_screen.dart';
 import 'shared/widgets/platform_wrapper.dart';
 
-void main() async {
+void main() {
   // Add comprehensive error handling
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
@@ -31,96 +32,195 @@ void main() async {
     return true;
   };
   
-  try {
-    WidgetsFlutterBinding.ensureInitialized();
-    debugPrint('Flutter binding initialized');
-  } catch (e, stack) {
-    debugPrint('Error initializing Flutter binding: $e');
-    debugPrint('Stack: $stack');
-    // Still try to run the app
-  }
+  // Ensure binding is initialized before runapp (although runapp does it)
+  // but more importantly before other platform channel calls
+  WidgetsFlutterBinding.ensureInitialized(); 
   
-  // Initialize Supabase with error handling
-  try {
-    // Debug: Print Supabase config to console
-    debugPrint('Supabase Config Check:');
-    debugPrint('URL: ${AppConfig.supabaseUrl.isEmpty ? 'EMPTY' : AppConfig.supabaseUrl}');
-    debugPrint('Key: ${AppConfig.supabaseAnonKey.isEmpty ? 'EMPTY' : (AppConfig.supabaseAnonKey == 'your-anon-key-here' ? 'DEFAULT' : 'CONFIGURED')}');
-
-    // Only initialize if we have valid-looking credentials
-    if (AppConfig.supabaseUrl.isNotEmpty && 
-        AppConfig.supabaseAnonKey.isNotEmpty &&
-        AppConfig.supabaseAnonKey != 'your-anon-key-here') {
-      await Supabase.initialize(
-        url: AppConfig.supabaseUrl,
-        anonKey: AppConfig.supabaseAnonKey,
-        authOptions: const FlutterAuthClientOptions(
-          authFlowType: AuthFlowType.pkce,
-        ),
-        debug: true,
-      );
-      SupabaseConfig.markAsInitialized();
-      debugPrint('Supabase initialized successfully');
-    } else {
-      debugPrint('Warning: Supabase not configured. App will run in demo mode.');
-    }
-  } catch (e, stack) {
-    // Log error but don't crash the app
-    debugPrint('Error initializing Supabase: $e');
-    debugPrint('Stack: $stack');
-    debugPrint('App will continue without Supabase connection.');
-  }
-  
-  // Kiosk mode setup (only for non-web platforms)
-  try {
-    if (PlatformDetector.isKiosk && !PlatformDetector.isWeb) {
-      await _setupKioskMode();
-    }
-  } catch (e, stack) {
-    debugPrint('Error in kiosk setup: $e');
-    debugPrint('Stack: $stack');
-  }
-  
-  try {
-    debugPrint('Starting app...');
-    runApp(const PhytoPiApp());
-    debugPrint('App started');
-  } catch (e, stack) {
-    debugPrint('Fatal error starting app: $e');
-    debugPrint('Stack: $stack');
-    // Try to show error UI
-    runApp(MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: Text('Error: $e'),
-        ),
-      ),
-    ));
-  }
+  // Let's try running app immediately.
+  runApp(const AppRoot());
 }
 
-/// Setup kiosk mode: fullscreen, prevent sleep, set orientation
-Future<void> _setupKioskMode() async {
-  try {
-    // Set preferred orientations (typically landscape for kiosks)
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-      DeviceOrientation.portraitUp, // Allow portrait as fallback
-    ]);
+/// Root widget that handles initialization and shows splash screen
+class AppRoot extends StatefulWidget {
+  const AppRoot({super.key});
+
+  @override
+  State<AppRoot> createState() => _AppRootState();
+}
+
+class _AppRootState extends State<AppRoot> {
+  bool _initialized = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    // Defer initialization to the next frame to ensure the UI has a chance to mount
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeApp();
+    });
+  }
+
+  Future<void> _initializeApp() async {
+    debugPrint('AppRoot: Starting initialization...');
     
-    // Hide system UI for true fullscreen (kiosk mode)
-    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
-    
-    // Keep screen on (prevent sleep)
-    // Note: This might require platform-specific plugins for production
-    // For now, we rely on system settings
-    
-    // Prevent app from being closed easily (kiosk mode)
-    // Platform-specific implementations would go here
-  } catch (e) {
-    // Ignore errors if platform doesn't support these features
-    debugPrint('Kiosk mode setup error: $e');
+    // Safety timeout: If initialization takes more than 5 seconds, force the app to load
+    // This prevents getting stuck on the loading screen if Supabase hangs
+    final timeoutTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted && !_initialized) {
+        debugPrint('AppRoot: Initialization timed out. Forcing app load in demo mode.');
+        setState(() {
+          _initialized = true;
+          // Don't set error, just let it run
+        });
+      }
+    });
+
+    try {
+      // Initialize Supabase
+      debugPrint('AppRoot: Checking Supabase Config...');
+      
+      // Wait for a small delay to ensure the UI has rendered at least one frame
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      if (AppConfig.supabaseUrl.isNotEmpty && 
+          AppConfig.supabaseAnonKey.isNotEmpty &&
+          AppConfig.supabaseAnonKey != 'your-anon-key-here') {
+        
+        debugPrint('AppRoot: Initializing Supabase...');
+        
+        // Race Supabase init with a shorter timeout
+        // Manually throw generic exception to avoid TimeoutException type issues if it's not imported correctly
+        // although dart:async is imported. The error log showed 'TimeoutException' isn't a type.
+        // This is strange as dart:async is imported. Let's check imports.
+        // Ah, the previous tool call added imports but maybe I missed dart:async in the replace block?
+        // Let's fix the replace block to include dart:async at the top.
+        
+        await Future.any([
+          Supabase.initialize(
+            url: AppConfig.supabaseUrl,
+            anonKey: AppConfig.supabaseAnonKey,
+            authOptions: const FlutterAuthClientOptions(
+              authFlowType: AuthFlowType.pkce,
+            ),
+            debug: true,
+          ),
+          Future.delayed(const Duration(seconds: 4), () {
+             // Just return null or throw a simple string to simplify
+             throw 'Supabase Init Timeout';
+          }),
+        ]);
+        
+        SupabaseConfig.markAsInitialized();
+        debugPrint('AppRoot: Supabase initialized successfully');
+      } else {
+        debugPrint('AppRoot: Warning: Supabase not configured. App will run in demo mode.');
+      }
+
+      // Kiosk mode setup (only for non-web platforms)
+      if (PlatformDetector.isKiosk && !PlatformDetector.isWeb) {
+        await _setupKioskMode();
+      }
+    } catch (e, stack) {
+      debugPrint('AppRoot: Error during initialization: $e');
+      debugPrint('Stack: $stack');
+      // We don't set _error here to avoid showing the error screen for timeouts
+      // instead we just let it fall through to finally and load the app
+      
+      // Simplified check
+      final String errorStr = e.toString();
+      if (!errorStr.contains('Timeout')) {
+         // Only log actual errors, but still allow app to proceed in demo mode
+         debugPrint('AppRoot: Non-fatal initialization error. Proceeding.');
+      }
+    } finally {
+      timeoutTimer.cancel();
+      if (mounted && !_initialized) {
+        setState(() {
+          _initialized = true;
+        });
+      }
+    }
+  }
+
+  Future<void> _setupKioskMode() async {
+    try {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+        DeviceOrientation.portraitUp,
+      ]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
+    } catch (e) {
+      debugPrint('Kiosk mode setup error: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Show error screen if initialization failed
+    if (_error != null) {
+      return MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                const SizedBox(height: 16),
+                Text('Initialization Error', style: Theme.of(context).textTheme.headlineSmall),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Text(_error!, textAlign: TextAlign.center),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _error = null;
+                      _initialized = false;
+                    });
+                    _initializeApp();
+                  },
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Show loading screen while initializing
+    if (!_initialized) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: Scaffold(
+          backgroundColor: Colors.white,
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(height: 24),
+                const Text(
+                  'PhytoPi Dashboard',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Initializing...',
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Show main app when initialized
+    return const PhytoPiApp();
   }
 }
 
@@ -139,7 +239,6 @@ class PhytoPiApp extends StatelessWidget {
             } catch (e, stack) {
               debugPrint('Error creating AuthProvider: $e');
               debugPrint('Stack: $stack');
-              // Return a minimal provider that won't crash
               return AuthProvider();
             }
           },
@@ -168,6 +267,13 @@ class PhytoPiApp extends StatelessWidget {
                 return Builder(
                   builder: (context) {
                     try {
+                      debugPrint('Building home. Web: ${PlatformDetector.isWeb}, Auth: ${authProvider.isAuthenticated}');
+                      
+                      // Web always shows landing page, which handles navigation to dashboard/profile/etc
+                      if (PlatformDetector.isWeb) {
+                        return const LandingPageScreen();
+                      }
+
                       // If user is authenticated, show dashboard
                       if (authProvider.isAuthenticated) {
                         return const PlatformWrapper(
@@ -175,17 +281,11 @@ class PhytoPiApp extends StatelessWidget {
                         );
                       }
 
-                      // Show landing page for web, dashboard for kiosk/mobile
-                      // Landing page allows navigation to dashboard
-                      if (PlatformDetector.isWeb) {
-                        return const LandingPageScreen();
-                      } else if (PlatformDetector.isKiosk) {
-                        // Kiosk mode: show dashboard directly (should be covered by auth check ideally)
+                      if (PlatformDetector.isKiosk) {
                         return const PlatformWrapper(
                           child: DashboardScreen(),
                         );
                       } else {
-                        // Mobile: show LoginScreen
                         return const LoginScreen();
                       }
                     } catch (e, stack) {

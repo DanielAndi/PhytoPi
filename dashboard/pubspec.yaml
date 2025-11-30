@@ -31,6 +31,7 @@ dependencies:
   
   # UI Components
   cupertino_icons: ^1.0.6
+  syncfusion_flutter_gauges: ^31.2.15
 
 dev_dependencies:
   flutter_test:

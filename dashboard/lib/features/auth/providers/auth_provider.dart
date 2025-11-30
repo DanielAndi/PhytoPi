@@ -28,9 +28,11 @@ class AuthProvider extends ChangeNotifier {
       // Restore existing session if available
       final session = SupabaseConfig.client?.auth.currentSession;
       _user = session?.user;
+      debugPrint('AuthProvider: Initial user state: ${_user?.email}');
       
       // Listen to auth state changes
       SupabaseConfig.client?.auth.onAuthStateChange.listen((data) {
+        debugPrint('AuthProvider: Auth state change: ${data.event}');
         _user = data.session?.user;
         notifyListeners();
       });
@@ -49,6 +51,7 @@ class AuthProvider extends ChangeNotifier {
     }
     
     try {
+      debugPrint('AuthProvider: Starting sign in for $email');
       _isLoading = true;
       _error = null;
       notifyListeners();
@@ -57,7 +60,9 @@ class AuthProvider extends ChangeNotifier {
         email: email,
         password: password,
       );
+      debugPrint('AuthProvider: Sign in successful');
     } catch (e) {
+      debugPrint('AuthProvider: Sign in error: $e');
       _error = e.toString();
     } finally {
       _isLoading = false;

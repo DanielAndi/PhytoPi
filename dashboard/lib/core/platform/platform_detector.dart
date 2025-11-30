@@ -1,6 +1,7 @@
-import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+// Use conditional import to handle dart:io on web
+import 'platform_web.dart' if (dart.library.io) 'platform_io.dart';
 
 enum AppPlatform {
   web,
@@ -29,7 +30,9 @@ class PlatformDetector {
     try {
       // This code won't run on web due to kIsWeb check above
       // but we need to handle it for type checking
-      return _getPlatformNative();
+      if (isAndroid || isIOS) return AppPlatform.mobile;
+      if (_isKioskMode()) return AppPlatform.kiosk;
+      return AppPlatform.desktop;
     } catch (e) {
       // Fallback to web if Platform is not available
       return AppPlatform.web;
@@ -37,17 +40,7 @@ class PlatformDetector {
   }
   
   static AppPlatform _getPlatformNative() {
-    // Check if we're in kiosk mode first (Linux with KIOSK_MODE=true)
-    if (_isKioskMode()) {
-      return AppPlatform.kiosk;
-    }
-    
-    // Check if mobile platform
-    if (_isMobileNative()) {
-      return AppPlatform.mobile;
-    }
-    
-    // Default to desktop for Linux, Windows, macOS
+    // Removed unused method that was causing tree-shaking issues or DDC errors
     return AppPlatform.desktop;
   }
 
@@ -67,7 +60,13 @@ class PlatformDetector {
   
   static bool _isMobileNative() {
     // Check if running on Android or iOS
-    return Platform.isAndroid || Platform.isIOS;
+    try {
+      // Handle cases where platform imports might fail in some environments
+      if (kIsWeb) return false;
+      return isAndroid || isIOS;
+    } catch (e) {
+      return false;
+    }
   }
   
   static bool get isKiosk => currentPlatform == AppPlatform.kiosk;
@@ -83,7 +82,12 @@ class PlatformDetector {
   
   static bool _isDesktopNative() {
     // Check if running on desktop platforms (Linux, Windows, macOS)
-    return Platform.isLinux || Platform.isWindows || Platform.isMacOS;
+    try {
+      if (kIsWeb) return false;
+      return isLinux || isWindows || isMacOS;
+    } catch (e) {
+      return false;
+    }
   }
 
   static bool _isKioskMode() {
@@ -111,4 +115,3 @@ class PlatformDetector {
     return diagonal > 7.0; // Approximate tablet size
   }
 }
-

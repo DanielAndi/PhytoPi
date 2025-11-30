@@ -317,7 +317,7 @@ int main()
         }
         
         // Debug output (always print current state)
-        const char *water_status = (water_level >= 5) ? "HAS WATER" : "NO WATER";
+        // const char *water_status = (water_level >= 5) ? "HAS WATER" : "NO WATER";
         printf("[%ld] Readings: Soil=%d, Water=%d, Light=%d, Hum=%d%%, Temp=%dC\n", 
                now, soil_moisture, water_level, light_level, humidity, temperature);
 

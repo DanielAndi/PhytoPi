@@ -1,4 +1,4 @@
-import 'dart:io' show Platform;
+// import 'dart:io' show Platform; // Removed to prevent web crashes
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'platform_detector.dart';
@@ -77,7 +77,7 @@ class PlatformUtils {
 
   /// Check if platform supports file system access
   static bool supportsFileSystem() {
-    return !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+    return !kIsWeb && PlatformDetector.isDesktop;
   }
 
   /// Check if platform supports notifications
@@ -89,11 +89,11 @@ class PlatformUtils {
   /// Get platform name as string
   static String getPlatformName() {
     if (kIsWeb) return 'Web';
-    if (Platform.isAndroid) return 'Android';
-    if (Platform.isIOS) return 'iOS';
-    if (Platform.isLinux) return 'Linux';
-    if (Platform.isWindows) return 'Windows';
-    if (Platform.isMacOS) return 'macOS';
+    if (PlatformDetector.isAndroid) return 'Android';
+    if (PlatformDetector.isIOS) return 'iOS';
+    if (PlatformDetector.isLinux) return 'Linux';
+    if (PlatformDetector.isWindows) return 'Windows';
+    if (PlatformDetector.isMacOS) return 'macOS';
     return 'Unknown';
   }
 

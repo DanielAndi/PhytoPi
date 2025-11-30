@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/config/app_config.dart';
+import '../../../core/platform/platform_detector.dart';
 import '../../../core/theme/theme_controller.dart';
 import '../providers/auth_provider.dart';
 import 'register_screen.dart';
@@ -178,14 +180,37 @@ class _LoginScreenState extends State<LoginScreen> {
                           
                           // Login Button
                           ElevatedButton(
-                            onPressed: authProvider.isLoading ? null : () {
+                            onPressed: authProvider.isLoading ? null : () async {
                               if (_usernameController.text.isEmpty || _passwordController.text.isEmpty) {
                                 return;
                               }
-                              authProvider.signIn(
+                              debugPrint('LoginScreen: Attempting sign in...');
+                              await authProvider.signIn(
                                 _usernameController.text,
                                 _passwordController.text,
                               );
+                              debugPrint('LoginScreen: Sign in complete. Auth: ${authProvider.isAuthenticated}, Web: ${PlatformDetector.isWeb}');
+
+                              if (context.mounted && 
+                                  authProvider.isAuthenticated && 
+                                  PlatformDetector.isWeb) {
+                                debugPrint('LoginScreen: Popping to landing page');
+                                // Use Future.delayed to ensure any background rebuilds are processed
+                                // and to show the success state briefly
+                                Future.delayed(const Duration(milliseconds: 200), () {
+                                  if (context.mounted) {
+                                    final navigator = Navigator.of(context);
+                                    final messenger = ScaffoldMessenger.of(context);
+                                    
+                                    navigator.pop();
+                                    
+                                    // Show snackbar after popping so it appears on the landing page
+                                    messenger.showSnackBar(
+                                      const SnackBar(content: Text('Login Successful')),
+                                    );
+                                  }
+                                });
+                              }
                             },
                             child: authProvider.isLoading
                               ? const SizedBox(
@@ -308,4 +333,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-
