@@ -15,6 +15,7 @@ static char *humidity_sensor_id = NULL;
 static char *temperature_sensor_id = NULL;
 static char *soil_moisture_sensor_id = NULL;
 static char *water_level_sensor_id = NULL;
+static char *light_level_sensor_id = NULL;
 
 /*
  * Sync unsynced readings to Supabase
@@ -112,6 +113,18 @@ void sync_to_supabase(sqlite3 *db, supabase_config_t *supabase_cfg)
                 supabase_count++;
             }
         }
+        else if (strcmp(readings[i].table_name, "light_level_data") == 0)
+        {
+            if (light_level_sensor_id && supabase_count < max_supabase_count)
+            {
+                supabase_readings[supabase_count].sensor_id = light_level_sensor_id;
+                supabase_readings[supabase_count].value = readings[i].value1;
+                supabase_readings[supabase_count].unit = "raw";
+                supabase_readings[supabase_count].timestamp = readings[i].timestamp;
+                supabase_readings[supabase_count].metadata = NULL;
+                supabase_count++;
+            }
+        }
     }
 
     if (supabase_count > 0)
@@ -169,6 +182,7 @@ int main()
     int temperature = -1;   // Initialize to -1 (error state)
     int soil_moisture = 0;
     int water_level = 0;
+    int light_level = 0;
 
     // Initialize the database
     sqlite3 *db = db_init("sensor_data.db");
@@ -189,6 +203,7 @@ int main()
     temperature_sensor_id = getenv("SUPABASE_TEMPERATURE_SENSOR_ID");
     soil_moisture_sensor_id = getenv("SUPABASE_SOIL_MOISTURE_SENSOR_ID");
     water_level_sensor_id = getenv("SUPABASE_WATER_LEVEL_SENSOR_ID");
+    light_level_sensor_id = getenv("SUPABASE_LIGHT_SENSOR_ID");
 
     // Initialize Supabase if configured
     int supabase_enabled = 0;
@@ -213,6 +228,7 @@ int main()
     char sql_dht11[256] = "INSERT INTO temp_hum_data (humidity, temperature, timestamp) VALUES (?, ?, ?);";
     char sql_soil_moisture[256] = "INSERT INTO soil_moisture_data (humidity, timestamp) VALUES (?, ?);";
     char sql_water_level[256] = "INSERT INTO water_level_data (has_water, timestamp) VALUES (?, ?);";
+    char sql_light_level[256] = "INSERT INTO light_level_data (light_level, timestamp) VALUES (?, ?);";
 
     time_t last_sync = time(NULL);
     time_t last_dht_read = 0;  // Track last DHT11 read time (needs 2+ second cooldown)
@@ -222,6 +238,7 @@ int main()
     {
         soil_moisture = (fd >= 0) ? read_ads7830_channel(fd, 0) : -1;  // Read soil moisture from A0
         water_level = (fd >= 0) ? read_ads7830_channel(fd, 2) : -1;    // Read water level from A2
+        light_level = (fd >= 0) ? read_ads7830_channel(fd, 1) : -1;    // Read light level from A1
         
         // DHT11 needs at least 2-3 seconds between reads for reliability
         // Also add retry logic for more reliability
@@ -274,15 +291,16 @@ int main()
         
         // Debug output (always print)
         const char *water_status = (water_level >= 5) ? "HAS WATER" : "NO WATER";
-        printf("Sensor readings - Soil: %d, Water Level: %d (%s), Humidity: %d%%, Temp: %d°C\n", 
-               soil_moisture, water_level, water_status, humidity, temperature);
+        printf("Sensor readings - Soil: %d, Water Level: %d (%s), Light: %d, Humidity: %d%%, Temp: %d°C\n", 
+               soil_moisture, water_level, water_status, light_level, humidity, temperature);
 
         int timestamp = (int)time(NULL); // Make one current timestamp for all inserts so they all match
 
         // Insert data into the database
         if ((sql_execute_insert(db, sql_dht11, humidity, temperature, timestamp) != SQLITE_OK) ||
             (sql_execute_insert(db, sql_soil_moisture, soil_moisture, 0, timestamp) != SQLITE_OK) ||
-            (sql_execute_insert(db, sql_water_level, water_level, 0, timestamp) != SQLITE_OK))
+            (sql_execute_insert(db, sql_water_level, water_level, 0, timestamp) != SQLITE_OK) ||
+            (sql_execute_insert(db, sql_light_level, light_level, 0, timestamp) != SQLITE_OK))
         {
             fprintf(stderr, "Failed to insert data into database.\n");
         }

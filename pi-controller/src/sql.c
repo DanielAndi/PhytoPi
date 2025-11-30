@@ -74,6 +74,7 @@ sqlite3 *db_init(const char *db_file)
     sql_execute(db, "CREATE TABLE IF NOT EXISTS temp_hum_data (id INTEGER PRIMARY KEY, humidity INTEGER, temperature INTEGER, timestamp INTEGER, synced INTEGER DEFAULT 0);");
     sql_execute(db, "CREATE TABLE IF NOT EXISTS soil_moisture_data (id INTEGER PRIMARY KEY, humidity INTEGER, timestamp INTEGER, synced INTEGER DEFAULT 0);");
     sql_execute(db, "CREATE TABLE IF NOT EXISTS water_level_data (id INTEGER PRIMARY KEY, has_water BOOLEAN, timestamp INTEGER, synced INTEGER DEFAULT 0);");
+    sql_execute(db, "CREATE TABLE IF NOT EXISTS light_level_data (id INTEGER PRIMARY KEY, light_level INTEGER, timestamp INTEGER, synced INTEGER DEFAULT 0);");
 
     // Migrate existing tables: add synced column if it doesn't exist
     // SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we check first
@@ -127,10 +128,27 @@ sqlite3 *db_init(const char *db_file)
         }
     }
 
+    // Check light_level_data
+    has_synced = 0;
+    if (sqlite3_prepare_v2(db, "PRAGMA table_info(light_level_data);", -1, &check_stmt, NULL) == SQLITE_OK) {
+        while (sqlite3_step(check_stmt) == SQLITE_ROW) {
+            const char *col_name = (const char *)sqlite3_column_text(check_stmt, 1);
+            if (col_name && strcmp(col_name, "synced") == 0) {
+                has_synced = 1;
+                break;
+            }
+        }
+        sqlite3_finalize(check_stmt);
+        if (!has_synced) {
+            sql_execute(db, "ALTER TABLE light_level_data ADD COLUMN synced INTEGER DEFAULT 0;");
+        }
+    }
+
     // Create indexes for faster unsynced queries
     sql_execute(db, "CREATE INDEX IF NOT EXISTS idx_temp_hum_synced ON temp_hum_data(synced);");
     sql_execute(db, "CREATE INDEX IF NOT EXISTS idx_soil_moisture_synced ON soil_moisture_data(synced);");
     sql_execute(db, "CREATE INDEX IF NOT EXISTS idx_water_level_synced ON water_level_data(synced);");
+    sql_execute(db, "CREATE INDEX IF NOT EXISTS idx_light_level_synced ON light_level_data(synced);");
 
     return db;
 }
@@ -155,7 +173,9 @@ int sql_get_unsynced_readings(sqlite3 *db, sqlite_reading_t **readings, int *cou
         "  UNION ALL "
         "  SELECT id FROM soil_moisture_data WHERE synced = 0 "
         "  UNION ALL "
-        "  SELECT id FROM water_level_data WHERE synced = 0"
+        "  SELECT id FROM water_level_data WHERE synced = 0 "
+        "  UNION ALL "
+        "  SELECT id FROM light_level_data WHERE synced = 0"
         ");";
 
     sqlite3_stmt *count_stmt;
@@ -228,6 +248,22 @@ int sql_get_unsynced_readings(sqlite3 *db, sqlite_reading_t **readings, int *cou
             (*readings)[idx].value2 = 0;
             (*readings)[idx].timestamp = sqlite3_column_int64(stmt, 2);
             strcpy((*readings)[idx].table_name, "water_level_data");
+            idx++;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    // Get unsynced light_level_data
+    const char *light_sql = "SELECT id, light_level, timestamp FROM light_level_data WHERE synced = 0 ORDER BY timestamp LIMIT 100;";
+    if (sqlite3_prepare_v2(db, light_sql, -1, &stmt, NULL) == SQLITE_OK)
+    {
+        while (sqlite3_step(stmt) == SQLITE_ROW && idx < *count)
+        {
+            (*readings)[idx].id = sqlite3_column_int(stmt, 0);
+            (*readings)[idx].value1 = sqlite3_column_int(stmt, 1);
+            (*readings)[idx].value2 = 0;
+            (*readings)[idx].timestamp = sqlite3_column_int64(stmt, 2);
+            strcpy((*readings)[idx].table_name, "light_level_data");
             idx++;
         }
         sqlite3_finalize(stmt);
