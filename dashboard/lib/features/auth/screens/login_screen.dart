@@ -7,6 +7,8 @@ import '../../../core/theme/theme_controller.dart';
 import '../providers/auth_provider.dart';
 import 'register_screen.dart';
 
+import '../../dashboard/screens/dashboard_screen.dart';
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -194,18 +196,16 @@ class _LoginScreenState extends State<LoginScreen> {
                               if (context.mounted && 
                                   authProvider.isAuthenticated && 
                                   PlatformDetector.isWeb) {
-                                debugPrint('LoginScreen: Popping to landing page');
+                                debugPrint('LoginScreen: Redirecting to Dashboard');
                                 // Use Future.delayed to ensure any background rebuilds are processed
-                                // and to show the success state briefly
                                 Future.delayed(const Duration(milliseconds: 200), () {
                                   if (context.mounted) {
-                                    final navigator = Navigator.of(context);
-                                    final messenger = ScaffoldMessenger.of(context);
+                                    // Redirect to Dashboard instead of popping to Landing Page
+                                    Navigator.of(context).pushReplacement(
+                                      MaterialPageRoute(builder: (_) => const DashboardScreen()),
+                                    );
                                     
-                                    navigator.pop();
-                                    
-                                    // Show snackbar after popping so it appears on the landing page
-                                    messenger.showSnackBar(
+                                    ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(content: Text('Login Successful')),
                                     );
                                   }

@@ -276,17 +276,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             label: const Text('Claim Device'),
           ),
           const SizedBox(width: 16),
-          Consumer<AuthProvider>(
-            builder: (context, authProvider, child) {
-               // Keep simple profile menu
-               return IconButton(
-                 icon: const Icon(Icons.logout),
-                 onPressed: () => authProvider.signOut(),
-                 tooltip: 'Logout',
-               );
-            },
-          ),
-          const SizedBox(width: 16),
         ],
       ),
       body: Row(
@@ -316,6 +305,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 selectedIcon: Icon(Icons.notifications),
                 label: Text('Alerts'),
               ),
+              NavigationRailDestination(
+                icon: Icon(Icons.person_outline),
+                selectedIcon: Icon(Icons.person),
+                label: Text('Profile'),
+              ),
             ],
           ),
           const VerticalDivider(thickness: 1, width: 1),
@@ -327,11 +321,74 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const DevicesScreen(),
                 const ChartsScreen(),
                 const AlertsScreen(),
+                _buildProfileView(context),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildProfileView(BuildContext context) {
+    final theme = Theme.of(context);
+    return Consumer<AuthProvider>(
+      builder: (context, authProvider, child) {
+        final user = authProvider.user;
+        final email = user?.email ?? 'Guest';
+        final initial = email.isNotEmpty ? email[0].toUpperCase() : '?';
+
+        return Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 400),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircleAvatar(
+                  radius: 48,
+                  backgroundColor: theme.primaryColor.withOpacity(0.1),
+                  child: Text(
+                    initial,
+                    style: theme.textTheme.headlineMedium?.copyWith(color: theme.primaryColor),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'User Profile',
+                  style: theme.textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  email,
+                  style: theme.textTheme.bodyLarge?.copyWith(color: theme.textTheme.bodySmall?.color),
+                ),
+                const SizedBox(height: 48),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () async {
+                       await authProvider.signOut();
+                       if (context.mounted) {
+                         if (PlatformDetector.isWeb) {
+                            Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+                         }
+                         // Mobile handled by state
+                       }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Logout'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
