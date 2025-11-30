@@ -91,8 +91,7 @@ static int wait_for_level(struct gpiod_line *line, int level, uint32_t timeout_u
         uint64_t elapsed = micros_now() - start;
         if (elapsed > timeout_64)
             return -1;
-        // Small delay to avoid busy-waiting
-        usleep(1);
+        // Busy-wait for precise timing
     }
     return (int)(micros_now() - start);
 }
@@ -131,7 +130,7 @@ int read_dht_via_kernel(int *humidity, int *temperature)
     gpiod_line_release(dht_line);
     
     // Delay before switching to input mode to ensure signal is stable
-    usleep(50);
+    usleep(10);
 
     // Switch to input mode with pull-up
     gpiod_line_request_input_flags(dht_line, "dht11", GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP);
