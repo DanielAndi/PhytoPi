@@ -227,7 +227,31 @@ int read_ads7830_channel(int fd, int channel)
     if (channel < 0 || channel > 7)
         return -1;
 
-    unsigned char cmd = 0x84 | (channel << 4); // 0x80 + channel selection bits
+    // ADS7830 Command Byte: SD C2 C1 C0 PD1 PD0 X X
+    // SD (Single-Ended/Differential) = 1 for Single-Ended
+    // PD1, PD0 = 0, 1 (Internal Reference OFF, A/D ON) => 0x04
+    // Channel Selection (C2, C1, C0) mapping:
+    // CH0: 000 (0x0) -> 0x84
+    // CH1: 100 (0x4) -> 0xC4
+    // CH2: 001 (0x1) -> 0x94
+    // CH3: 101 (0x5) -> 0xD4
+    // CH4: 010 (0x2) -> 0xA4
+    // CH5: 110 (0x6) -> 0xE4
+    // CH6: 011 (0x3) -> 0xB4
+    // CH7: 111 (0x7) -> 0xF4
+
+    unsigned char channel_map[] = {
+        0x84, // CH0
+        0xC4, // CH1
+        0x94, // CH2
+        0xD4, // CH3
+        0xA4, // CH4
+        0xE4, // CH5
+        0xB4, // CH6
+        0xF4  // CH7
+    };
+
+    unsigned char cmd = channel_map[channel];
     unsigned char data;
 
     // Send the command byte
