@@ -1,25 +1,31 @@
 #!/bin/bash
 # Stream camera video to TCP port 8888
-# Supports both libcamera (Bullseye/Bookworm) and legacy raspivid (Buster)
+# Supports rpicam (Bookworm), libcamera (Bullseye), and legacy raspivid
 
 PORT=8888
 
-# Check for libcamera-vid (modern OS)
-if command -v libcamera-vid &> /dev/null; then
-    echo "Found libcamera-vid. Starting stream on port $PORT..."
+# Check for rpicam-vid (Newest OS - Bookworm) or libcamera-vid (Bullseye)
+if command -v rpicam-vid &> /dev/null; then
+    CAM_TOOL="rpicam-vid"
+elif command -v libcamera-vid &> /dev/null; then
+    CAM_TOOL="libcamera-vid"
+fi
+
+if [ -n "$CAM_TOOL" ]; then
+    echo "Found modern camera tool: $CAM_TOOL"
+    echo "Starting stream on port $PORT..."
     echo "To view on your computer, use VLC Media Player:"
     echo "  Media -> Open Network Stream -> tcp/h264://<PI_IP>:$PORT"
-    echo "  (Replace <PI_IP> with your Raspberry Pi's IP address)"
     
     # -t 0: Run forever
     # --inline: Insert SPS/PPS headers (needed for streaming)
     # --listen: Listen for incoming connection
     # --width 1280 --height 720: Standard HD resolution
-    libcamera-vid -t 0 --inline --listen --width 1280 --height 720 -o tcp://0.0.0.0:$PORT
+    $CAM_TOOL -t 0 --inline --listen --width 1280 --height 720 -o tcp://0.0.0.0:$PORT
 
-# Check for raspivid (legacy OS)
+# Check for raspivid (Legacy OS - Buster/Old)
 elif command -v raspivid &> /dev/null; then
-    echo "Found raspivid. Starting stream on port $PORT..."
+    echo "Found legacy raspivid. Starting stream on port $PORT..."
     echo "To view on your computer, use VLC Media Player:"
     echo "  Media -> Open Network Stream -> tcp/h264://<PI_IP>:$PORT"
     
@@ -30,7 +36,7 @@ elif command -v raspivid &> /dev/null; then
 
 else
     echo "Error: No compatible camera streaming tool found."
-    echo "Please ensure you have 'libcamera-apps' installed or legacy camera support enabled."
+    echo "Checked for: rpicam-vid, libcamera-vid, raspivid"
+    echo "Please ensure you have 'rpicam-apps' or 'libcamera-apps' installed."
     exit 1
 fi
-
