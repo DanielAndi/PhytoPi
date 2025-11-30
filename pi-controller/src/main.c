@@ -273,7 +273,7 @@ int main()
         }
         
         // Debug output (always print)
-        const char *water_status = (water_level > 100) ? "HAS WATER" : "NO WATER";
+        const char *water_status = (water_level >= 5) ? "HAS WATER" : "NO WATER";
         printf("Sensor readings - Soil: %d, Water Level: %d (%s), Humidity: %d%%, Temp: %d°C\n", 
                soil_moisture, water_level, water_status, humidity, temperature);
 
