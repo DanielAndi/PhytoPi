@@ -106,7 +106,7 @@ void sync_to_supabase(sqlite3 *db, supabase_config_t *supabase_cfg)
             {
                 supabase_readings[supabase_count].sensor_id = water_level_sensor_id;
                 supabase_readings[supabase_count].value = readings[i].value1;
-                supabase_readings[supabase_count].unit = "boolean";
+                supabase_readings[supabase_count].unit = "raw";
                 supabase_readings[supabase_count].timestamp = readings[i].timestamp;
                 supabase_readings[supabase_count].metadata = NULL;
                 supabase_count++;
@@ -161,8 +161,8 @@ int main()
     }
 
     // Initialize GPIO for water level sensor
-    gpio_init(WATER_LEVEL_PIN);
-    gpio_config_input(WATER_LEVEL_PIN);
+    // gpio_init(WATER_LEVEL_PIN);
+    // gpio_config_input(WATER_LEVEL_PIN);
 
     // Variables to hold sensor data
     int humidity = -1;      // Initialize to -1 (error state)
@@ -221,7 +221,7 @@ int main()
     while (1)
     {
         soil_moisture = (fd >= 0) ? read_ads7830_channel(fd, 0) : -1;  // Read soil moisture from A0
-        water_level = gpio_read(WATER_LEVEL_PIN);     // Read water level from GPIO pin
+        water_level = (fd >= 0) ? read_ads7830_channel(fd, 2) : -1;    // Read water level from A2
         
         // DHT11 needs at least 2-3 seconds between reads for reliability
         // Also add retry logic for more reliability
@@ -276,7 +276,7 @@ int main()
         // Debug output (prints every 30 seconds)
         if (iteration % 15 == 0) // Print every 30 seconds (15 iterations * 2 seconds)
         {
-            const char *water_status = (water_level == 1) ? "HAS WATER" : "NO WATER";
+            const char *water_status = (water_level > 100) ? "HAS WATER" : "NO WATER";
             printf("Sensor readings - Soil: %d, Water Level: %d (%s), Humidity: %d%%, Temp: %d°C\n", 
                    soil_moisture, water_level, water_status, humidity, temperature);
         }
