@@ -1,6 +1,7 @@
 #include "../lib/gpio.h"
 #include <stdint.h>
 #include <time.h>
+#include <sched.h>
 
 static struct gpiod_chip *chip;
 static struct gpiod_line *line;
@@ -116,73 +117,97 @@ int read_dht_via_kernel(int *humidity, int *temperature)
 
     uint8_t data[5] = {0};
 
-    // Start signal: pull low for 20ms, then high for 40us
-    // Release any previous state first
-    gpiod_line_release(dht_line);
-    usleep(50000);  // 50ms delay to ensure clean state and let sensor stabilize
+    // Request line as OUTPUT with PULL UP (initial state High)
+    struct gpiod_line_request_config config;
+    config.consumer = "dht11";
+    config.request_type = GPIOD_LINE_REQUEST_DIRECTION_OUTPUT;
+    config.flags = GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP;
     
-    gpiod_line_request_output(dht_line, "dht11", 1);
-    usleep(1000);
+    if (gpiod_line_request(dht_line, &config, 1) < 0)
+    {
+        gpiod_chip_close(dht_chip);
+        return -1;
+    }
+
+    // Boost process priority to real-time to minimize preemption during critical timing
+    struct sched_param param;
+    param.sched_priority = sched_get_priority_max(SCHED_FIFO);
+    int old_policy = sched_getscheduler(0);
+    struct sched_param old_param;
+    sched_getparam(0, &old_param);
+    
+    // Try to set real-time priority (might fail if not root, but worth trying)
+    sched_setscheduler(0, SCHED_FIFO, &param);
+
+    // Start signal: pull low for 20ms
     gpiod_line_set_value(dht_line, 0);
     usleep(20000);  // 20ms - DHT11 requires at least 18ms
-    gpiod_line_set_value(dht_line, 1);
-    usleep(40);     // 40us - DHT11 requires 20-40us
-    gpiod_line_release(dht_line);
+
+    // Switch to input mode - pull-up will pull line high
+    // This avoids the overhead of "set high + wait + set input"
+    // Using set_direction avoids releasing the line
+    gpiod_line_set_direction_input(dht_line);
+
+    // Wait for response signal (Low)
+    // After we release (switch to input), line goes High (pull-up).
+    // Sensor waits 20-40us then pulls Low.
+    if (wait_for_level(dht_line, 0, 200) < 0)
+    {
+        // Restore priority before returning
+        sched_setscheduler(0, old_policy, &old_param);
+        gpiod_line_release(dht_line);
+        gpiod_chip_close(dht_chip);
+        return -2; // No response (low)
+    }
     
-    // Delay before switching to input mode to ensure signal is stable
-    usleep(10);
-
-    // Switch to input mode with pull-up
-    gpiod_line_request_input_flags(dht_line, "dht11", GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP);
-
-    // Wait for response signal (increased timeouts for reliability)
-    if (wait_for_level(dht_line, 0, 300) < 0)  // Increased from 200 to 300us
+    // Wait for response signal (High) - 80us
+    if (wait_for_level(dht_line, 1, 200) < 0)
     {
+        sched_setscheduler(0, old_policy, &old_param);
         gpiod_line_release(dht_line);
         gpiod_chip_close(dht_chip);
-        return -2;
+        return -3; // No response (high)
     }
-    if (wait_for_level(dht_line, 1, 300) < 0)  // Increased from 200 to 300us
+    
+    // Wait for start of first bit (Low) - 80us
+    if (wait_for_level(dht_line, 0, 200) < 0)
     {
+        sched_setscheduler(0, old_policy, &old_param);
         gpiod_line_release(dht_line);
         gpiod_chip_close(dht_chip);
-        return -3;
-    }
-    if (wait_for_level(dht_line, 0, 300) < 0)  // Increased from 200 to 300us
-    {
-        gpiod_line_release(dht_line);
-        gpiod_chip_close(dht_chip);
-        return -4;
+        return -4; // Data read timeout
     }
 
     // Read 40 bits of data
-    // Further increased timeouts for more reliable reading
     for (int i = 0; i < 40; i++)
     {
-        // Wait for high pulse (start of bit)
-        int wait_high = wait_for_level(dht_line, 1, 300);  // Increased to 300us for more tolerance
-        if (wait_high < 0)
+        // Wait for high pulse (start of bit's high part)
+        // We are currently Low (50us start of bit). Wait for it to go High.
+        if (wait_for_level(dht_line, 1, 100) < 0)
         {
+            sched_setscheduler(0, old_policy, &old_param);
             gpiod_line_release(dht_line);
             gpiod_chip_close(dht_chip);
             return -5;  // Timeout waiting for high
         }
         
-        // Wait for low pulse (end of bit) - this is where error -6 occurs
-        int high_duration = wait_for_level(dht_line, 0, 300);  // Increased to 300us
+        // Measure duration of High pulse
+        // If > 40us, it's a '1', else '0'
+        // This waits for it to go Low (start of next bit)
+        int high_duration = wait_for_level(dht_line, 0, 100);
         if (high_duration < 0)
         {
+            sched_setscheduler(0, old_policy, &old_param);
             gpiod_line_release(dht_line);
             gpiod_chip_close(dht_chip);
-            // Error -6: Timeout waiting for low after high
-            // This usually means the sensor stopped responding mid-transmission
-            return -6;
+            return -6; // Timeout waiting for low
         }
 
-        // If high duration > 40us, it's a '1', otherwise '0'
-        // Adjusted threshold slightly for better reliability
         data[i / 8] = (data[i / 8] << 1) | (high_duration > 40 ? 1 : 0);
     }
+
+    // Restore priority
+    sched_setscheduler(0, old_policy, &old_param);
 
     gpiod_line_release(dht_line);
     gpiod_chip_close(dht_chip);
