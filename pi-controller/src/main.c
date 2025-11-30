@@ -227,6 +227,7 @@ int main()
         // Also add retry logic for more reliability
         time_t now = time(NULL);
         int dht_result = -1;
+        int dht_skipped = 0;
         if (now - last_dht_read >= 3)  // Increased from 2 to 3 seconds
         {
             // Try reading up to 3 times
@@ -247,39 +248,34 @@ int main()
         else
         {
             // Use previous values if we're in cooldown period
-            // (humidity and temperature retain their previous values)
+            dht_skipped = 1;
         }
         
-        // If DHT11 read failed, set values to -1 to indicate error
-        if (dht_result != 0)
+        // If DHT11 read failed (and wasn't skipped), set values to -1 to indicate error
+        if (!dht_skipped && dht_result != 0)
         {
             humidity = -1;
             temperature = -1;
-            if (iteration % 30 == 0) // Print error every 60 seconds
+            
+            const char *error_msg = "Unknown error";
+            switch (dht_result)
             {
-                const char *error_msg = "Unknown error";
-                switch (dht_result)
-                {
-                    case -1: error_msg = "Failed to open GPIO chip or get line"; break;
-                    case -2: error_msg = "No response signal (low)"; break;
-                    case -3: error_msg = "No response signal (high)"; break;
-                    case -4: error_msg = "No response signal (low after high)"; break;
-                    case -5: error_msg = "Data read timeout (high)"; break;
-                    case -6: error_msg = "Data read timeout (low)"; break;
-                    case -7: error_msg = "Checksum mismatch"; break;
-                }
-                fprintf(stderr, "Warning: DHT11 sensor read failed (error: %d - %s). Check GPIO pin %d connection and wiring.\n", 
-                        dht_result, error_msg, DHT22_PIN);
+                case -1: error_msg = "Failed to open GPIO chip or get line"; break;
+                case -2: error_msg = "No response signal (low)"; break;
+                case -3: error_msg = "No response signal (high)"; break;
+                case -4: error_msg = "No response signal (low after high)"; break;
+                case -5: error_msg = "Data read timeout (high)"; break;
+                case -6: error_msg = "Data read timeout (low)"; break;
+                case -7: error_msg = "Checksum mismatch"; break;
             }
+            fprintf(stderr, "Warning: DHT11 sensor read failed (error: %d - %s). Check GPIO pin %d connection and wiring.\n", 
+                    dht_result, error_msg, DHT22_PIN);
         }
         
-        // Debug output (prints every 30 seconds)
-        if (iteration % 15 == 0) // Print every 30 seconds (15 iterations * 2 seconds)
-        {
-            const char *water_status = (water_level > 100) ? "HAS WATER" : "NO WATER";
-            printf("Sensor readings - Soil: %d, Water Level: %d (%s), Humidity: %d%%, Temp: %d°C\n", 
-                   soil_moisture, water_level, water_status, humidity, temperature);
-        }
+        // Debug output (always print)
+        const char *water_status = (water_level > 100) ? "HAS WATER" : "NO WATER";
+        printf("Sensor readings - Soil: %d, Water Level: %d (%s), Humidity: %d%%, Temp: %d°C\n", 
+               soil_moisture, water_level, water_status, humidity, temperature);
 
         int timestamp = (int)time(NULL); // Make one current timestamp for all inserts so they all match
 
