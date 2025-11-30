@@ -51,3 +51,17 @@ export SUPABASE_WATER_LEVEL_SENSOR_ID="sensor-uuid"
 ### Local Storage
 
 Data is always stored locally in `sensor_data.db` (SQLite) first, ensuring data persistence even if Supabase is unavailable. The sync process marks records as synced after successful upload, so failed syncs will be retried on the next sync cycle.
+
+## Camera Streaming
+
+To visualize the camera input (Arducam 5MP/OV5647) from a remote computer:
+
+1. **Enable the camera interface** on the Pi (usually enabled by default on modern OS with `camera_auto_detect=1` in `/boot/config.txt`).
+2. **Run the streaming script**:
+   ```bash
+   ./scripts/stream_camera.sh
+   ```
+3. **View the stream on your computer** using VLC Media Player:
+   - Open VLC
+   - Go to **Media** -> **Open Network Stream**
+   - Enter `tcp/h264://<PI_IP>:8888` (replace `<PI_IP>` with your Pi's IP address)
