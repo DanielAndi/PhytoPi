@@ -23,7 +23,7 @@ int main() {
         } else {
             printf("Photoresistor Value (Light Intensity): %d/255\n", val);
         }
-        sleep(3);
+        sleep(1);
     }
 
     close(fd);
