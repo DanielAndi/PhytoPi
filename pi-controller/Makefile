@@ -7,10 +7,15 @@ SRC = src/main.c src/gpio.c src/sql.c src/supabase.c
 OBJ = $(SRC:.c=.o)
 
 TARGET = $(BINDIR)/phytopi
+TEST_TARGET = $(BINDIR)/test_photoresistor
 
-all: $(TARGET)
+all: $(TARGET) $(TEST_TARGET)
 
 $(TARGET): $(OBJ)
+	mkdir -p $(BINDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(TEST_TARGET): src/photoresistor_test.c src/gpio.c
 	mkdir -p $(BINDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
