@@ -72,51 +72,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _showClaimDeviceDialog(BuildContext context) {
-    final deviceIdController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Claim Device'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Enter the Device ID found on your PhytoPi unit.'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: deviceIdController,
-              decoration: const InputDecoration(
-                labelText: 'Device ID',
-                hintText: 'e.g., PP-1234-5678',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              // TODO: Implement actual claim logic with Supabase
-              final id = deviceIdController.text;
-              Navigator.pop(context);
-              if (id.isNotEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Claiming device $id...')),
-                );
-              }
-            },
-            child: const Text('Claim'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     try {
@@ -169,11 +124,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: const Text('PhytoPi'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            onPressed: () => _showClaimDeviceDialog(context),
-            tooltip: 'Claim Device',
-          ),
         ],
       ),
       drawer: _buildDrawer(context),
@@ -270,11 +220,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         actions: [
-          FilledButton.icon(
-            onPressed: () => _showClaimDeviceDialog(context),
-            icon: const Icon(Icons.add),
-            label: const Text('Claim Device'),
-          ),
+          // Claim Device moved to Devices tab
           const SizedBox(width: 16),
         ],
       ),
