@@ -325,10 +325,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     onPressed: () async {
                        await authProvider.signOut();
                        if (context.mounted) {
-                         if (PlatformDetector.isWeb) {
-                            Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+                         // Let main.dart Consumer handle the route switch.
+                         // If we were pushed (e.g. from LandingPage), pop to clear the stack.
+                         if (Navigator.canPop(context)) {
+                           Navigator.pop(context);
                          }
-                         // Mobile handled by state
                        }
                     },
                     style: FilledButton.styleFrom(

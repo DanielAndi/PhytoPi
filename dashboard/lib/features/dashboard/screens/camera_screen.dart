@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../widgets/mjpeg_view.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key});
@@ -91,44 +92,9 @@ class _CameraScreenState extends State<CameraScreen> {
                       fit: StackFit.expand,
                       children: [
                         if (_isPlaying)
-                          Image.network(
-                            _currentUrl,
+                          MjpegView(
+                            url: _currentUrl,
                             fit: BoxFit.contain,
-                            errorBuilder: (context, error, stackTrace) {
-                              return Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.error_outline, color: Colors.red, size: 48),
-                                    const SizedBox(height: 16),
-                                    Text(
-                                      'Connection Failed',
-                                      style: TextStyle(color: Colors.white.withOpacity(0.8)),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      'Check URL and ensure camera is running',
-                                      style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                            loadingBuilder: (context, child, loadingProgress) {
-                              if (loadingProgress == null) return child;
-                              return Center(
-                                child: CircularProgressIndicator(
-                                  value: loadingProgress.expectedTotalBytes != null
-                                      ? loadingProgress.cumulativeBytesLoaded / 
-                                        loadingProgress.expectedTotalBytes!
-                                      : null,
-                                ),
-                              );
-                            },
-                            // Force reload by adding timestamp if needed, but for MJPEG stream it should just keep open.
-                            // Note: Image.network on Web supports MJPEG natively. 
-                            // On Mobile it might just show the first frame or fail depending on implementation.
-                            // For "work once deployed in vercel" (Web), this is the standard approach.
                           )
                         else
                           Center(

@@ -196,14 +196,14 @@ class _LoginScreenState extends State<LoginScreen> {
                               if (context.mounted && 
                                   authProvider.isAuthenticated && 
                                   PlatformDetector.isWeb) {
-                                debugPrint('LoginScreen: Redirecting to Dashboard');
+                                debugPrint('LoginScreen: Auth successful. Checking navigation stack.');
                                 // Use Future.delayed to ensure any background rebuilds are processed
                                 Future.delayed(const Duration(milliseconds: 200), () {
                                   if (context.mounted) {
-                                    // Redirect to Dashboard instead of popping to Landing Page
-                                    Navigator.of(context).pushReplacement(
-                                      MaterialPageRoute(builder: (_) => const DashboardScreen()),
-                                    );
+                                    // Just pop to reveal the Dashboard that main.dart renders
+                                    if (Navigator.canPop(context)) {
+                                      Navigator.pop(context);
+                                    }
                                     
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(content: Text('Login Successful')),
