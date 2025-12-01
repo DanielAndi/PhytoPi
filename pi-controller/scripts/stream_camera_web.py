@@ -119,31 +119,39 @@ if __name__ == '__main__':
     
     try:
         # Start camera process
-        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
+        # Changed stderr to PIPE to capture errors
+        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
         
         # Start a thread to read from camera stdout and write to StreamingOutput
         # Actually, we can just do it in a loop here if we use threading for the server.
         import threading
+        import time
         
+        def log_stderr():
+            for line in camera_proc.stderr:
+                logging.error(f"Camera Error: {line.decode('utf-8').strip()}")
+
         def capture_loop():
             # This is a simplified MJPEG parser. 
             # rpicam-vid outputting MJPEG simply dumps JPEGs one after another.
             # We need to find the JPEG boundaries (FF D8 ... FF D9).
-            # However, rpicam-vid output might just be a stream.
-            # A safer way is to read chunks and look for start/end markers.
             
             stream = camera_proc.stdout
-            # We'll read into the output object. 
-            # But StreamingOutput expects clean frames?
-            # Actually StreamingOutput in the example (based on picamera) expects write calls.
-            # But here we have a stream.
             
             # Simple buffer strategy
             # JPEG start: 0xFF 0xD8
             # JPEG end: 0xFF 0xD9
             
             data = b''
+            frame_count = 0
+            last_log = time.time()
+            
             while True:
+                # Check if process died
+                if camera_proc.poll() is not None:
+                    logging.error("Camera process exited unexpectedly.")
+                    break
+                    
                 # Read small chunks
                 chunk = stream.read(4096)
                 if not chunk:
@@ -169,7 +177,18 @@ if __name__ == '__main__':
                     data = data[end+2:]
                     
                     output.write(jpg)
+                    frame_count += 1
+                    
+                    if time.time() - last_log > 5:
+                        logging.info(f"Captured {frame_count} frames so far...")
+                        last_log = time.time()
         
+        # Start stderr logger
+        t_err = threading.Thread(target=log_stderr)
+        t_err.daemon = True
+        t_err.start()
+        
+        # Start capture loop
         t = threading.Thread(target=capture_loop)
         t.daemon = True
         t.start()
