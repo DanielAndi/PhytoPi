@@ -56,6 +56,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             self.wfile.write(content)
         elif self.path == '/stream.mjpg':
             self.send_response(200)
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.send_header('Age', 0)
             self.send_header('Cache-Control', 'no-cache, private')
             self.send_header('Pragma', 'no-cache')
@@ -89,11 +90,13 @@ output = StreamingOutput()
 def get_camera_command():
     # Check for rpicam-vid (Bookworm) or libcamera-vid (Bullseye)
     # We use --codec mjpeg to get MJPEG stream to stdout
+    # Note: --inline might be needed for some players, but for mjpeg container it should be fine.
+    # Use --nopreview to save resources
     cmd = None
     if subprocess.call("command -v rpicam-vid", shell=True, stdout=subprocess.DEVNULL) == 0:
-        cmd = ["rpicam-vid", "-t", "0", "--width", str(WIDTH), "--height", str(HEIGHT), "--framerate", str(FRAMERATE), "--codec", "mjpeg", "-o", "-"]
+        cmd = ["rpicam-vid", "-t", "0", "--width", str(WIDTH), "--height", str(HEIGHT), "--framerate", str(FRAMERATE), "--codec", "mjpeg", "--nopreview", "-o", "-"]
     elif subprocess.call("command -v libcamera-vid", shell=True, stdout=subprocess.DEVNULL) == 0:
-        cmd = ["libcamera-vid", "-t", "0", "--width", str(WIDTH), "--height", str(HEIGHT), "--framerate", str(FRAMERATE), "--codec", "mjpeg", "-o", "-"]
+        cmd = ["libcamera-vid", "-t", "0", "--width", str(WIDTH), "--height", str(HEIGHT), "--framerate", str(FRAMERATE), "--codec", "mjpeg", "--nopreview", "-o", "-"]
     elif subprocess.call("command -v raspivid", shell=True, stdout=subprocess.DEVNULL) == 0:
         # Raspivid produces H264, not MJPEG natively in a way easy to pipe frame-by-frame without raspimjpeg
         # So we might fail back or try to use raspistill in burst mode?
@@ -147,12 +150,24 @@ if __name__ == '__main__':
                     break
                 data += chunk
                 
-                a = data.find(b'\xff\xd8')
-                b = data.find(b'\xff\xd9')
-                
-                if a != -1 and b != -1:
-                    jpg = data[a:b+2]
-                    data = data[b+2:]
+                while True:
+                    start = data.find(b'\xff\xd8')
+                    if start == -1:
+                        # No start marker. Keep last few bytes in case marker is split.
+                        if len(data) > 2:
+                            data = data[-2:]
+                        break
+                        
+                    end = data.find(b'\xff\xd9', start)
+                    if end == -1:
+                        # Start found but no end. Keep data starting from start marker.
+                        data = data[start:]
+                        break
+                    
+                    # Found full frame
+                    jpg = data[start:end+2]
+                    data = data[end+2:]
+                    
                     output.write(jpg)
         
         t = threading.Thread(target=capture_loop)
