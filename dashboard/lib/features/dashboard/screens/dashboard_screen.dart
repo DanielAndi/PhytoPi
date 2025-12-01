@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:math';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:phytopi_dashboard/shared/controllers/smooth_scroll_controller.dart';
 import '../../../core/platform/platform_detector.dart';
 import '../../../core/config/app_config.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../providers/device_provider.dart';
 import 'charts_screen.dart';
 import 'alerts_screen.dart';
 import 'devices_screen.dart';
@@ -340,120 +342,200 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildDashboardContent(BuildContext context) {
     final theme = Theme.of(context);
-    
-    // Dummy data for charts
-    final List<FlSpot> tempPoints = List.generate(10, (index) {
-      return FlSpot(index.toDouble(), 20 + Random().nextDouble() * 5);
-    });
-    final List<FlSpot> humidityPoints = List.generate(10, (index) {
-      return FlSpot(index.toDouble(), 60 + Random().nextDouble() * 10);
-    });
 
-    return SingleChildScrollView(
-      controller: _webScrollController, // Shared controller for simplicity
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Overview',
-            style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Monitor your plant environment in real-time',
-            style: theme.textTheme.bodyLarge?.copyWith(color: theme.textTheme.bodySmall?.color),
-          ),
-          const SizedBox(height: 32),
-          
-          // GAUGES ROW
-          Text('Live Readings', style: theme.textTheme.titleLarge),
-          const SizedBox(height: 16),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              // Adaptive grid for gauges
-              final width = constraints.maxWidth;
-              final count = width > 800 ? 3 : (width > 500 ? 2 : 1);
-              return Wrap(
-                spacing: 16,
-                runSpacing: 16,
-                children: [
-                  SizedBox(
-                    width: (width - (16 * (count - 1))) / count,
-                    height: 250,
-                    child: DashboardGauge(
-                      title: 'Temperature',
-                      value: 22.5,
-                      min: 0,
-                      max: 50,
-                      unit: '°C',
-                      color: Colors.orange,
-                    ),
-                  ),
-                  SizedBox(
-                    width: (width - (16 * (count - 1))) / count,
-                    height: 250,
-                    child: DashboardGauge(
-                      title: 'Humidity',
-                      value: 65,
-                      min: 0,
-                      max: 100,
-                      unit: '%',
-                      color: Colors.blue,
-                    ),
-                  ),
-                  SizedBox(
-                    width: (width - (16 * (count - 1))) / count,
-                    height: 250,
-                    child: DashboardGauge(
-                      title: 'Light Level',
-                      value: 85,
-                      min: 0,
-                      max: 100,
-                      unit: '%',
-                      color: Colors.amber,
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
+    return Consumer<DeviceProvider>(
+      builder: (context, deviceProvider, child) {
+        final selectedDevice = deviceProvider.selectedDevice;
+        final hasReadings = deviceProvider.hasReadings;
+        final latestReadings = deviceProvider.latestReadings;
+        final historicalReadings = deviceProvider.historicalReadings;
+        final lastUpdate = deviceProvider.lastUpdate;
 
-          const SizedBox(height: 40),
+        final tempPoints = historicalReadings['temp_c'] ?? [];
+        final humidityPoints = historicalReadings['humidity'] ?? [];
 
-          // CHARTS ROW
-          Text('History (24h)', style: theme.textTheme.titleLarge),
-          const SizedBox(height: 16),
-          SizedBox(
-            height: 400,
-            child: Row(
-              children: [
-                Expanded(
-                  child: DashboardChart(
-                    title: 'Temperature Trend',
-                    dataPoints: tempPoints,
-                    minY: 0,
-                    maxY: 40,
-                    unit: '°C',
-                    color: Colors.orange,
+        return SingleChildScrollView(
+          controller: _webScrollController, // Shared controller for simplicity
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Overview',
+                style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Monitor your plant environment in real-time',
+                style: theme.textTheme.bodyLarge?.copyWith(color: theme.textTheme.bodySmall?.color),
+              ),
+              const SizedBox(height: 32),
+              
+              if (selectedDevice == null)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 32),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withOpacity(0.1),
+                    border: Border.all(color: Colors.amber),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber, color: Colors.amber),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'No Device Selected',
+                              style: theme.textTheme.titleMedium?.copyWith(color: Colors.amber[900]),
+                            ),
+                            const Text('Please select a device from the Devices tab to view readings.'),
+                          ],
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          if (PlatformDetector.isWeb) {
+                             setState(() => _webSelectedIndex = 1); // Switch to Devices tab
+                          } else {
+                             setState(() => _mobileSelectedIndex = 1);
+                          }
+                        },
+                        child: const Text('Select Device'),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: DashboardChart(
-                    title: 'Humidity Trend',
-                    dataPoints: humidityPoints,
-                    minY: 0,
-                    maxY: 100,
-                    unit: '%',
-                    color: Colors.blue,
+              
+              if (selectedDevice != null) ...[
+                // GAUGES ROW
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Live Readings', style: theme.textTheme.titleLarge),
+                    if (lastUpdate != null)
+                      Text(
+                        'Last updated: ${DateFormat('HH:mm:ss').format(lastUpdate.toLocal())}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    // Adaptive grid for gauges
+                    final width = constraints.maxWidth;
+                    final count = width > 800 ? 3 : (width > 500 ? 2 : 1);
+                    return Wrap(
+                      spacing: 16,
+                      runSpacing: 16,
+                      children: [
+                        SizedBox(
+                          width: (width - (16 * (count - 1))) / count,
+                          height: 250,
+                          child: DashboardGauge(
+                            title: 'Temperature',
+                            value: latestReadings['temp_c'] ?? 0,
+                            min: 0,
+                            max: 50,
+                            unit: '°C',
+                            color: Colors.orange,
+                          ),
+                        ),
+                        SizedBox(
+                          width: (width - (16 * (count - 1))) / count,
+                          height: 250,
+                          child: DashboardGauge(
+                            title: 'Humidity',
+                            value: latestReadings['humidity'] ?? 0,
+                            min: 0,
+                            max: 100,
+                            unit: '%',
+                            color: Colors.blue,
+                          ),
+                        ),
+                        SizedBox(
+                          width: (width - (16 * (count - 1))) / count,
+                          height: 250,
+                          child: DashboardGauge(
+                            title: 'Light Level',
+                            value: latestReadings['light_lux'] ?? 0,
+                            min: 0,
+                            max: 2000, // Adjusted for Lux
+                            unit: 'lux',
+                            color: Colors.amber,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 40),
+
+                // CHARTS ROW
+                Text('History', style: theme.textTheme.titleLarge),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 400,
+                  child: Stack(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DashboardChart(
+                              title: 'Temperature Trend',
+                              dataPoints: tempPoints,
+                              minY: 10, // Adjusted min to show variation better if room temp
+                              maxY: 40,
+                              unit: '°C',
+                              color: Colors.orange,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: DashboardChart(
+                              title: 'Humidity Trend',
+                              dataPoints: humidityPoints,
+                              minY: 20,
+                              maxY: 100,
+                              unit: '%',
+                              color: Colors.blue,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (!hasReadings)
+                        Container(
+                          color: theme.scaffoldBackgroundColor.withOpacity(0.8),
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.sensors_off, size: 48, color: Colors.grey),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'No Readings Available',
+                                  style: theme.textTheme.titleLarge,
+                                ),
+                                const SizedBox(height: 8),
+                                const Text('Waiting for data from device...'),
+                                const SizedBox(height: 16),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
-            ),
+            ],
           ),
-        ],
-      ),
+        );
+      }
     );
   }
 }

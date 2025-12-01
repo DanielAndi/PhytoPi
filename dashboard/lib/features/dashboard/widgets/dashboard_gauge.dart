@@ -68,6 +68,8 @@ class DashboardGauge extends StatelessWidget {
                       width: 0.2,
                       sizeUnit: GaugeSizeUnit.factor,
                       color: gaugeColor,
+                      enableAnimation: true,
+                      animationDuration: 1000,
                     ),
                   ],
                   annotations: <GaugeAnnotation>[
@@ -101,4 +103,3 @@ class DashboardGauge extends StatelessWidget {
     );
   }
 }
-

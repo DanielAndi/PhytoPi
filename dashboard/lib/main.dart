@@ -13,6 +13,7 @@ import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
 import 'features/auth/providers/auth_provider.dart';
 import 'features/auth/screens/login_screen.dart';
+import 'features/dashboard/providers/device_provider.dart';
 import 'features/dashboard/screens/dashboard_screen.dart';
 import 'features/marketing/screens/landing_page_screen.dart';
 import 'shared/widgets/platform_wrapper.dart';
@@ -243,6 +244,7 @@ class PhytoPiApp extends StatelessWidget {
             }
           },
         ),
+        ChangeNotifierProvider(create: (_) => DeviceProvider()),
       ],
       child: Consumer<ThemeController>(
         builder: (context, themeController, _) {
@@ -269,16 +271,16 @@ class PhytoPiApp extends StatelessWidget {
                     try {
                       debugPrint('Building home. Web: ${PlatformDetector.isWeb}, Auth: ${authProvider.isAuthenticated}');
                       
-                      // Web always shows landing page, which handles navigation to dashboard/profile/etc
-                      if (PlatformDetector.isWeb) {
-                        return const LandingPageScreen();
-                      }
-
                       // If user is authenticated, show dashboard
                       if (authProvider.isAuthenticated) {
                         return const PlatformWrapper(
                           child: DashboardScreen(),
                         );
+                      }
+
+                      // Web unauthenticated users show landing page
+                      if (PlatformDetector.isWeb) {
+                        return const LandingPageScreen();
                       }
 
                       if (PlatformDetector.isKiosk) {
