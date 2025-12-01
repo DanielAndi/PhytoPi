@@ -351,6 +351,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         final tempPoints = historicalReadings['temp_c'] ?? [];
         final humidityPoints = historicalReadings['humidity'] ?? [];
+        final lightPoints = historicalReadings['light_lux'] ?? [];
+        final soilPoints = historicalReadings['soil_moisture'] ?? [];
+        final waterPoints = historicalReadings['water_level'] ?? [];
 
         return SingleChildScrollView(
           controller: _webScrollController, // Shared controller for simplicity
@@ -467,6 +470,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             color: Colors.amber,
                           ),
                         ),
+                        SizedBox(
+                          width: (width - (16 * (count - 1))) / count,
+                          height: 250,
+                          child: DashboardGauge(
+                            title: 'Soil Moisture',
+                            value: latestReadings['soil_moisture'] ?? 0,
+                            min: 0,
+                            max: 100,
+                            unit: '%',
+                            color: Colors.green,
+                          ),
+                        ),
+                        SizedBox(
+                          width: (width - (16 * (count - 1))) / count,
+                          height: 250,
+                          child: DashboardGauge(
+                            title: 'Water Level',
+                            value: latestReadings['water_level'] ?? 0,
+                            min: 0,
+                            max: 100,
+                            unit: '%',
+                            color: Colors.cyan,
+                          ),
+                        ),
                       ],
                     );
                   },
@@ -477,37 +504,94 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 // CHARTS ROW
                 Text('History', style: theme.textTheme.titleLarge),
                 const SizedBox(height: 16),
-                SizedBox(
-                  height: 400,
-                  child: Stack(
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: DashboardChart(
-                              title: 'Temperature Trend',
-                              dataPoints: tempPoints,
-                              minY: 10, // Adjusted min to show variation better if room temp
-                              maxY: 40,
-                              unit: '°C',
-                              color: Colors.orange,
-                            ),
+                Stack(
+                  children: [
+                    Column(
+                      children: [
+                        SizedBox(
+                          height: 400,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: DashboardChart(
+                                  title: 'Temperature Trend',
+                                  dataPoints: tempPoints,
+                                  minY: 10, // Adjusted min to show variation better if room temp
+                                  maxY: 40,
+                                  unit: '°C',
+                                  color: Colors.orange,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: DashboardChart(
+                                  title: 'Humidity Trend',
+                                  dataPoints: humidityPoints,
+                                  minY: 20,
+                                  maxY: 100,
+                                  unit: '%',
+                                  color: Colors.blue,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: DashboardChart(
-                              title: 'Humidity Trend',
-                              dataPoints: humidityPoints,
-                              minY: 20,
-                              maxY: 100,
-                              unit: '%',
-                              color: Colors.blue,
-                            ),
+                        ),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          height: 400,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: DashboardChart(
+                                  title: 'Light Trend',
+                                  dataPoints: lightPoints,
+                                  minY: 0,
+                                  maxY: 2000,
+                                  unit: 'lux',
+                                  color: Colors.amber,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: DashboardChart(
+                                  title: 'Soil Moisture Trend',
+                                  dataPoints: soilPoints,
+                                  minY: 0,
+                                  maxY: 100,
+                                  unit: '%',
+                                  color: Colors.green,
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      if (!hasReadings)
-                        Container(
+                        ),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          height: 400,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: DashboardChart(
+                                  title: 'Water Level Trend',
+                                  dataPoints: waterPoints,
+                                  minY: 0,
+                                  maxY: 100,
+                                  unit: '%',
+                                  color: Colors.cyan,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              const Expanded(
+                                child: SizedBox(), // Placeholder to keep alignment if we had 4 items
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (!hasReadings)
+                      Positioned.fill(
+                        child: Container(
                           color: theme.scaffoldBackgroundColor.withOpacity(0.8),
                           child: Center(
                             child: Column(
@@ -526,8 +610,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             ),
                           ),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
               ],
             ],

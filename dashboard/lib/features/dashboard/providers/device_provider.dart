@@ -276,6 +276,8 @@ class DeviceProvider extends ChangeNotifier {
       'temp_c': 22.5,
       'humidity': 65.0,
       'light_lux': 850.0, // Lux
+      'soil_moisture': 45.0,
+      'water_level': 80.0,
     };
     _hasReadings = true;
     _lastUpdate = DateTime.now();
@@ -290,6 +292,18 @@ class DeviceProvider extends ChangeNotifier {
       'humidity': List.generate(10, (i) {
         final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
         return FlSpot(ts, 60 + Random().nextDouble() * 10);
+      }),
+      'light_lux': List.generate(10, (i) {
+        final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
+        return FlSpot(ts, 800 + Random().nextDouble() * 100);
+      }),
+      'soil_moisture': List.generate(10, (i) {
+        final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
+        return FlSpot(ts, 40 + Random().nextDouble() * 10);
+      }),
+      'water_level': List.generate(10, (i) {
+        final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
+        return FlSpot(ts, 75 + Random().nextDouble() * 5);
       }),
     };
     notifyListeners();
@@ -313,16 +327,30 @@ class DeviceProvider extends ChangeNotifier {
       final newLight = (currentLight + (Random().nextDouble() - 0.5) * 50).clamp(0.0, 2000.0);
       _latestReadings['light_lux'] = newLight;
 
+      final currentSoil = _latestReadings['soil_moisture'] ?? 45.0;
+      final newSoil = (currentSoil + (Random().nextDouble() - 0.5) * 2).clamp(0.0, 100.0);
+      _latestReadings['soil_moisture'] = newSoil;
+
+      final currentWater = _latestReadings['water_level'] ?? 80.0;
+      final newWater = (currentWater + (Random().nextDouble() - 0.5)).clamp(0.0, 100.0);
+      _latestReadings['water_level'] = newWater;
+
       final now = DateTime.now();
       _lastUpdate = now;
       
       // Update history
       final ts = now.millisecondsSinceEpoch.toDouble();
-      for (final key in ['temp_c', 'humidity']) {
-         final history = _historicalReadings[key]!;
+      for (final key in ['temp_c', 'humidity', 'light_lux', 'soil_moisture', 'water_level']) {
+         final history = _historicalReadings[key] ?? []; // Handle potential null if key not in initial map (though it should be)
          if (history.length >= 20) history.removeAt(0);
          
-         final val = key == 'temp_c' ? newTemp : newHum;
+         double val = 0.0;
+         if (key == 'temp_c') val = newTemp;
+         else if (key == 'humidity') val = newHum;
+         else if (key == 'light_lux') val = newLight;
+         else if (key == 'soil_moisture') val = newSoil;
+         else if (key == 'water_level') val = newWater;
+
          history.add(FlSpot(ts, val));
          _historicalReadings[key] = List.from(history);
       }
