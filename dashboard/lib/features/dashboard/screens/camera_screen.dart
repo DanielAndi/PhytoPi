@@ -33,10 +33,18 @@ class _CameraScreenState extends State<CameraScreen> {
       if (_isPlaying) {
         _isPlaying = false;
       } else {
-        _currentUrl = _urlController.text;
+        _updateUrlWithTimestamp();
         _isPlaying = true;
       }
     });
+  }
+
+  void _updateUrlWithTimestamp() {
+    final baseUrl = _urlController.text;
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    // Append timestamp to force reload and bypass cache
+    final separator = baseUrl.contains('?') ? '&' : '?';
+    _currentUrl = '$baseUrl${separator}_t=$timestamp';
   }
 
   @override
@@ -187,7 +195,7 @@ class _CameraScreenState extends State<CameraScreen> {
                       FilledButton.tonal(
                         onPressed: _isPlaying ? null : () {
                           setState(() {
-                            _currentUrl = _urlController.text;
+                            _updateUrlWithTimestamp();
                             _isPlaying = true;
                           });
                         },
