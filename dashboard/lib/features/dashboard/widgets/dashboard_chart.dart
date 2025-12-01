@@ -1,5 +1,6 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 class DashboardChart extends StatelessWidget {
   final String title;
@@ -23,6 +24,18 @@ class DashboardChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final chartColor = color ?? theme.primaryColor;
+
+    double minX = 0;
+    double maxX = 10;
+    if (dataPoints.isNotEmpty) {
+      minX = dataPoints.first.x;
+      maxX = dataPoints.last.x;
+      // Ensure we have a range
+      if (minX == maxX) {
+        minX -= 1000 * 60; // -1 min
+        maxX += 1000 * 60; // +1 min
+      }
+    }
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -50,6 +63,25 @@ class DashboardChart extends StatelessWidget {
           Expanded(
             child: LineChart(
               LineChartData(
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    tooltipBgColor: theme.cardColor,
+                    getTooltipItems: (touchedSpots) {
+                      return touchedSpots.map((spot) {
+                        final date = DateTime.fromMillisecondsSinceEpoch(spot.x.toInt());
+                        final dateStr = DateFormat('MMM d, HH:mm:ss').format(date);
+                        return LineTooltipItem(
+                          '$dateStr\n${spot.y.toStringAsFixed(1)} $unit',
+                          theme.textTheme.bodySmall!.copyWith(
+                            color: chartColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        );
+                      }).toList();
+                    },
+                  ),
+                  handleBuiltInTouches: true,
+                ),
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
@@ -73,13 +105,13 @@ class DashboardChart extends StatelessWidget {
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 30,
-                      interval: 1,
+                      interval: (maxX - minX) / 3 <= 0 ? 1 : (maxX - minX) / 3,
                       getTitlesWidget: (value, meta) {
-                        // Simple time labels for now
+                        final date = DateTime.fromMillisecondsSinceEpoch(value.toInt());
                         return Padding(
                           padding: const EdgeInsets.only(top: 8.0),
                           child: Text(
-                            '${value.toInt()}h',
+                            DateFormat('HH:mm').format(date),
                             style: theme.textTheme.bodySmall,
                           ),
                         );
@@ -101,18 +133,21 @@ class DashboardChart extends StatelessWidget {
                   ),
                 ),
                 borderData: FlBorderData(show: false),
-                minX: 0,
-                maxX: dataPoints.isNotEmpty ? dataPoints.last.x : 10,
+                minX: minX,
+                maxX: maxX,
                 minY: minY,
                 maxY: maxY,
                 lineBarsData: [
                   LineChartBarData(
                     spots: dataPoints,
-                    isCurved: true,
+                    isCurved: false,
                     color: chartColor,
                     barWidth: 3,
                     isStrokeCapRound: true,
-                    dotData: const FlDotData(show: false),
+                    dotData: const FlDotData(
+                      show: true,
+                      getDotPainter: _getDotPainter,
+                    ),
                     belowBarData: BarAreaData(
                       show: true,
                       color: chartColor.withOpacity(0.1),
@@ -124,6 +159,19 @@ class DashboardChart extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  static FlDotPainter _getDotPainter(
+    FlSpot spot,
+    double xPercentage,
+    LineChartBarData bar,
+    int index,
+  ) {
+    return FlDotCirclePainter(
+      radius: 2,
+      color: bar.color ?? Colors.white,
+      strokeWidth: 0,
     );
   }
 }

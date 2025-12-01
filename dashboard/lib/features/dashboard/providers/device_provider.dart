@@ -168,18 +168,15 @@ class DeviceProvider extends ChangeNotifier {
           
           // Build history (reversed because we fetched descending)
           final points = data.map((r) {
-             // Convert timestamp to something plottable, e.g., index or relative time
-             // For simplicity in this chart, we might just use an index 0..N or relative hours
-             // But FlChart needs X,Y. Let's use millisecondsSinceEpoch for X but scaled?
-             // Or just index for now as the chart in dashboard was index based.
-             // Let's try to map to an index based on time or just sequential.
-             // Sequential is easier for a simple trend line.
-             return (r['value'] as num).toDouble();
-          }).toList().reversed.toList(); // Oldest first
+             final val = (r['value'] as num).toDouble();
+             final ts = DateTime.parse(r['ts']).millisecondsSinceEpoch.toDouble();
+             return FlSpot(ts, val);
+          }).toList();
+
+          // Ensure points are sorted by X (time) to prevent chart loops
+          points.sort((a, b) => a.x.compareTo(b.x));
           
-          _historicalReadings[typeKey] = List.generate(points.length, (index) {
-             return FlSpot(index.toDouble(), points[index]);
-          });
+          _historicalReadings[typeKey] = points;
           
           _hasReadings = true;
         }
@@ -238,27 +235,22 @@ class DeviceProvider extends ChangeNotifier {
       
       // Update history
       final currentHistory = _historicalReadings[typeKey] ?? [];
-      final newIndex = currentHistory.isNotEmpty ? currentHistory.last.x + 1 : 0;
+      final newTimestamp = ts.millisecondsSinceEpoch.toDouble();
       
-      // Keep only last 50 points
-      if (currentHistory.length >= 50) {
-        currentHistory.removeAt(0);
-        // Shift indices to keep chart moving smoothly or just append
-        // If we just append, x grows indefinitely. For a scrolling chart that's fine,
-        // but eventually float precision issues? unlikely for 50 points.
-        // But let's just append for now as before.
-        // Actually, let's shift x values back to 0..49 to keep it clean?
-        // The previous implementation shifted values.
-        // Let's stick to the previous logic but cleaner.
-        final shifted = List<FlSpot>.generate(currentHistory.length, (i) {
-           return FlSpot(i.toDouble(), currentHistory[i].y);
-        });
-        shifted.add(FlSpot(shifted.length.toDouble(), value));
-        _historicalReadings[typeKey] = shifted;
-      } else {
-        currentHistory.add(FlSpot(newIndex.toDouble(), value));
-        _historicalReadings[typeKey] = List.from(currentHistory); 
+      // Add new point
+      currentHistory.add(FlSpot(newTimestamp, value));
+      
+      // Keep only last 50 points, but after sorting to ensure we keep the newest ones
+      // Sort by X (time) to prevent chart loops
+      currentHistory.sort((a, b) => a.x.compareTo(b.x));
+      
+      if (currentHistory.length > 50) {
+        // Remove oldest points (first ones after sort)
+        final excess = currentHistory.length - 50;
+        currentHistory.removeRange(0, excess);
       }
+      
+      _historicalReadings[typeKey] = List.from(currentHistory);
       
       notifyListeners();
     } catch (e) {
@@ -289,9 +281,16 @@ class DeviceProvider extends ChangeNotifier {
     _lastUpdate = DateTime.now();
     
     // Generate initial history
+    final now = DateTime.now();
     _historicalReadings = {
-      'temp_c': List.generate(10, (i) => FlSpot(i.toDouble(), 20 + Random().nextDouble() * 5)),
-      'humidity': List.generate(10, (i) => FlSpot(i.toDouble(), 60 + Random().nextDouble() * 10)),
+      'temp_c': List.generate(10, (i) {
+        final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
+        return FlSpot(ts, 20 + Random().nextDouble() * 5);
+      }),
+      'humidity': List.generate(10, (i) {
+        final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
+        return FlSpot(ts, 60 + Random().nextDouble() * 10);
+      }),
     };
     notifyListeners();
 
@@ -314,18 +313,18 @@ class DeviceProvider extends ChangeNotifier {
       final newLight = (currentLight + (Random().nextDouble() - 0.5) * 50).clamp(0.0, 2000.0);
       _latestReadings['light_lux'] = newLight;
 
-      _lastUpdate = DateTime.now();
+      final now = DateTime.now();
+      _lastUpdate = now;
       
       // Update history
+      final ts = now.millisecondsSinceEpoch.toDouble();
       for (final key in ['temp_c', 'humidity']) {
          final history = _historicalReadings[key]!;
          if (history.length >= 20) history.removeAt(0);
          
-         // Shift indices
-         final shifted = List.generate(history.length, (i) => FlSpot(i.toDouble(), history[i].y));
          final val = key == 'temp_c' ? newTemp : newHum;
-         shifted.add(FlSpot(shifted.length.toDouble(), val));
-         _historicalReadings[key] = shifted;
+         history.add(FlSpot(ts, val));
+         _historicalReadings[key] = List.from(history);
       }
 
       notifyListeners();
