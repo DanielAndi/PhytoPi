@@ -33,14 +33,65 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <div id="loading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; font-family: sans-serif; z-index: 9999;">
+    <p style="font-size: 18px; margin-bottom: 10px;">Loading PhytoPi Dashboard...</p>
+    <p id="loading-text" style="font-size: 12px; color: #666;">Please wait...</p>
+    <div id="error-container" style="display: none; color: red; margin-top: 20px; max-width: 80vw;">
+      <p id="error-message"></p>
+      <button onclick="window.location.reload(true)" style="margin-top: 10px; padding: 8px 16px; cursor: pointer;">Reload Page</button>
+    </div>
+  </div>
+
   <script>
-    // Loading indicator
-    var loadingDiv = document.createElement('div');
-    loadingDiv.id = 'loading';
-    loadingDiv.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; font-family: sans-serif; z-index: 9999;';
-    loadingDiv.innerHTML = '<p style="font-size: 18px; margin-bottom: 10px;">Loading PhytoPi Dashboard...</p><p style="font-size: 12px; color: #666;">Please wait...</p>';
-    document.body.appendChild(loadingDiv);
-    
+    // PROACTIVE CACHE CLEARING
+    // Automatically unregister service workers to prevent stale caching issues during development.
+    // This ensures the browser always fetches the latest version of the app.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for(let registration of registrations) {
+          registration.unregister().then(function(boolean) {
+            if(boolean) console.log('Unregistered existing service worker.');
+          });
+        }
+      });
+    }
+
+    // Global error handler to catch script errors
+    window.onerror = function(message, source, lineno, colno, error) {
+      var loading = document.getElementById('loading');
+      if (loading && loading.style.display !== 'none') {
+        document.getElementById('loading-text').style.display = 'none';
+        document.getElementById('error-container').style.display = 'block';
+        document.getElementById('error-message').innerText = 'Error: ' + message;
+      }
+    };
+
+    // Timeout handler
+    setTimeout(function() {
+      var loading = document.getElementById('loading');
+      if (loading && loading.style.display !== 'none') {
+        document.getElementById('loading-text').innerText = 'Taking longer than expected...';
+        var reloadBtn = document.createElement('button');
+        reloadBtn.innerText = 'Force Reload';
+        reloadBtn.style.marginTop = '10px';
+        reloadBtn.style.padding = '5px 10px';
+        reloadBtn.onclick = function() {
+          // Clear cache and reload
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(registrations) {
+              for(let registration of registrations) {
+                registration.unregister();
+              }
+              window.location.reload(true);
+            });
+          } else {
+            window.location.reload(true);
+          }
+        };
+        loading.appendChild(reloadBtn);
+      }
+    }, 10000); // 10 seconds timeout
+
     // Hide loading when Flutter app loads
     window.addEventListener('flutter-first-frame', function() {
       var loading = document.getElementById('loading');
@@ -55,6 +106,10 @@
     calls _flutter.loader.load() with the correct configuration.
     This is the standard way to initialize Flutter web apps.
   -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script src="flutter_bootstrap.js" async onerror="
+    document.getElementById('loading-text').style.display = 'none';
+    document.getElementById('error-container').style.display = 'block';
+    document.getElementById('error-message').innerText = 'Failed to load flutter_bootstrap.js';
+  "></script>
 </body>
 </html>

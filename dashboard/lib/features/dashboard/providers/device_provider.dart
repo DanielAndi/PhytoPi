@@ -58,6 +58,11 @@ class DeviceProvider extends ChangeNotifier {
       final data = response as List<dynamic>;
       _devices = data.map((json) => Device.fromJson(json)).toList();
       
+      // Auto-select first device if none selected
+      if (_selectedDevice == null && _devices.isNotEmpty) {
+        selectDevice(_devices.first);
+      }
+      
     } catch (e) {
       _error = e.toString();
       debugPrint('DeviceProvider: Error loading devices: $e');
@@ -72,7 +77,12 @@ class DeviceProvider extends ChangeNotifier {
       Device(id: 'demo-1', name: 'Living Room PhytoPi', isOnline: true, lastSeen: DateTime.now()),
       Device(id: 'demo-2', name: 'Bedroom PhytoPi', isOnline: false, lastSeen: DateTime.now().subtract(const Duration(hours: 2))),
     ];
-    notifyListeners();
+    
+    if (_selectedDevice == null && _devices.isNotEmpty) {
+      selectDevice(_devices.first);
+    } else {
+      notifyListeners();
+    }
   }
 
   void selectDevice(Device device) {

@@ -150,8 +150,9 @@ echo ""
 # Automatically open Firefox if available
 if [ "$HAS_FIREFOX" = true ]; then
     # Open Firefox after Flutter server starts (give it a few seconds)
+    # Increased wait time to 20s to ensure build completes before browser opens
     (
-        sleep 5
+        sleep 20
         firefox http://localhost:3000 2>/dev/null &
     ) &
     BROWSER_PID=$!

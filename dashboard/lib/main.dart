@@ -19,26 +19,30 @@ import 'features/marketing/screens/landing_page_screen.dart';
 import 'shared/widgets/platform_wrapper.dart';
 
 void main() {
-  // Add comprehensive error handling
-  FlutterError.onError = (FlutterErrorDetails details) {
-    FlutterError.presentError(details);
-    debugPrint('Flutter Error: ${details.exception}');
-    debugPrint('Stack: ${details.stack}');
-  };
-  
-  // Handle platform errors
-  PlatformDispatcher.instance.onError = (error, stack) {
-    debugPrint('Platform Error: $error');
+  // Catch errors during initialization
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    // Add comprehensive error handling
+    FlutterError.onError = (FlutterErrorDetails details) {
+      FlutterError.presentError(details);
+      debugPrint('Flutter Error: ${details.exception}');
+      debugPrint('Stack: ${details.stack}');
+    };
+
+    // Handle platform errors
+    PlatformDispatcher.instance.onError = (error, stack) {
+      debugPrint('Platform Error: $error');
+      debugPrint('Stack: $stack');
+      return true;
+    };
+
+    // Run the app
+    runApp(const AppRoot());
+  }, (error, stack) {
+    debugPrint('Zone Error: $error');
     debugPrint('Stack: $stack');
-    return true;
-  };
-  
-  // Ensure binding is initialized before runapp (although runapp does it)
-  // but more importantly before other platform channel calls
-  WidgetsFlutterBinding.ensureInitialized(); 
-  
-  // Let's try running app immediately.
-  runApp(const AppRoot());
+  });
 }
 
 /// Root widget that handles initialization and shows splash screen
@@ -65,14 +69,13 @@ class _AppRootState extends State<AppRoot> {
   Future<void> _initializeApp() async {
     debugPrint('AppRoot: Starting initialization...');
     
-    // Safety timeout: If initialization takes more than 5 seconds, force the app to load
+    // Safety timeout: If initialization takes more than 6 seconds, force the app to load
     // This prevents getting stuck on the loading screen if Supabase hangs
-    final timeoutTimer = Timer(const Duration(seconds: 5), () {
+    final timeoutTimer = Timer(const Duration(seconds: 6), () {
       if (mounted && !_initialized) {
         debugPrint('AppRoot: Initialization timed out. Forcing app load in demo mode.');
         setState(() {
           _initialized = true;
-          // Don't set error, just let it run
         });
       }
     });
@@ -90,13 +93,6 @@ class _AppRootState extends State<AppRoot> {
         
         debugPrint('AppRoot: Initializing Supabase...');
         
-        // Race Supabase init with a shorter timeout
-        // Manually throw generic exception to avoid TimeoutException type issues if it's not imported correctly
-        // although dart:async is imported. The error log showed 'TimeoutException' isn't a type.
-        // This is strange as dart:async is imported. Let's check imports.
-        // Ah, the previous tool call added imports but maybe I missed dart:async in the replace block?
-        // Let's fix the replace block to include dart:async at the top.
-        
         await Future.any([
           Supabase.initialize(
             url: AppConfig.supabaseUrl,
@@ -105,14 +101,12 @@ class _AppRootState extends State<AppRoot> {
               authFlowType: AuthFlowType.pkce,
             ),
             debug: true,
-          ),
-          Future.delayed(const Duration(seconds: 4), () {
-             // Just return null or throw a simple string to simplify
+          ).then((_) => SupabaseConfig.markAsInitialized()),
+          Future.delayed(const Duration(seconds: 5), () {
              throw 'Supabase Init Timeout';
           }),
         ]);
         
-        SupabaseConfig.markAsInitialized();
         debugPrint('AppRoot: Supabase initialized successfully');
       } else {
         debugPrint('AppRoot: Warning: Supabase not configured. App will run in demo mode.');
@@ -125,15 +119,7 @@ class _AppRootState extends State<AppRoot> {
     } catch (e, stack) {
       debugPrint('AppRoot: Error during initialization: $e');
       debugPrint('Stack: $stack');
-      // We don't set _error here to avoid showing the error screen for timeouts
-      // instead we just let it fall through to finally and load the app
-      
-      // Simplified check
-      final String errorStr = e.toString();
-      if (!errorStr.contains('Timeout')) {
-         // Only log actual errors, but still allow app to proceed in demo mode
-         debugPrint('AppRoot: Non-fatal initialization error. Proceeding.');
-      }
+      // Continue to load app in demo mode
     } finally {
       timeoutTimer.cancel();
       if (mounted && !_initialized) {
@@ -264,6 +250,28 @@ class PhytoPiApp extends StatelessWidget {
                 PointerDeviceKind.unknown,
               },
             ),
+            builder: (context, child) {
+              ErrorWidget.builder = (FlutterErrorDetails errorDetails) {
+                return Scaffold(
+                  body: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                          const SizedBox(height: 16),
+                          Text('Application Error', style: Theme.of(context).textTheme.titleLarge),
+                          const SizedBox(height: 8),
+                          Text(errorDetails.exceptionAsString(), textAlign: TextAlign.center),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              };
+              return child ?? const SizedBox.shrink();
+            },
             home: Consumer<AuthProvider>(
               builder: (context, authProvider, _) {
                 return Builder(
