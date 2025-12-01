@@ -12,6 +12,7 @@ import '../providers/device_provider.dart';
 import 'charts_screen.dart';
 import 'alerts_screen.dart';
 import 'devices_screen.dart';
+import 'camera_screen.dart';
 import 'ai_health_screen.dart';
 import '../../settings/screens/profile_screen.dart';
 import '../../support/screens/help_support_screen.dart';
@@ -134,6 +135,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const DevicesScreen(),
           const ChartsScreen(),
           const AlertsScreen(),
+          const CameraScreen(),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -145,6 +147,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.devices), label: 'Devices'),
           BottomNavigationBarItem(icon: Icon(Icons.bar_chart), label: 'Charts'),
           BottomNavigationBarItem(icon: Icon(Icons.notifications), label: 'Alerts'),
+          BottomNavigationBarItem(icon: Icon(Icons.videocam), label: 'Camera'),
         ],
       ),
     );
@@ -252,6 +255,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 label: Text('Alerts'),
               ),
               NavigationRailDestination(
+                icon: Icon(Icons.videocam_outlined),
+                selectedIcon: Icon(Icons.videocam),
+                label: Text('Camera'),
+              ),
+              NavigationRailDestination(
                 icon: Icon(Icons.person_outline),
                 selectedIcon: Icon(Icons.person),
                 label: Text('Profile'),
@@ -267,6 +275,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const DevicesScreen(),
                 const ChartsScreen(),
                 const AlertsScreen(),
+                const CameraScreen(),
                 _buildProfileView(context),
               ],
             ),
