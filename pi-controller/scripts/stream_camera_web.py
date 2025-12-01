@@ -28,18 +28,12 @@ PAGE = """\
 class StreamingOutput(object):
     def __init__(self):
         self.frame = None
-        self.buffer = io.BytesIO()
         self.condition = Condition()
 
-    def write(self, buf):
-        if buf.startswith(b'\xff\xd8'):
-            # New frame, copy the existing buffer's content and notify all
-            self.buffer.truncate()
-            with self.condition:
-                self.frame = self.buffer.getvalue()
-                self.condition.notify_all()
-            self.buffer.seek(0)
-        return self.buffer.write(buf)
+    def set_frame(self, frame):
+        with self.condition:
+            self.frame = frame
+            self.condition.notify_all()
 
 class StreamingHandler(server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -67,6 +61,10 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                     with output.condition:
                         output.condition.wait()
                         frame = output.frame
+                    
+                    if frame is None:
+                        continue
+
                     self.wfile.write(b'--FRAME\r\n')
                     self.send_header('Content-Type', 'image/jpeg')
                     self.send_header('Content-Length', len(frame))
@@ -176,7 +174,7 @@ if __name__ == '__main__':
                     jpg = data[start:end+2]
                     data = data[end+2:]
                     
-                    output.write(jpg)
+                    output.set_frame(jpg)
                     frame_count += 1
                     
                     if time.time() - last_log > 5:
