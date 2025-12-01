@@ -47,10 +47,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    // Setup auto-refresh for kiosk mode
-    if (AppConfig.enableAutoRefresh) {
-      _setupAutoRefresh();
-    }
+    // Always auto-refresh to keep relative time displays ("X min ago") updated
+    _setupAutoRefresh();
   }
 
   @override
@@ -418,7 +416,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Text('Live Readings', style: theme.textTheme.titleLarge),
                     if (lastUpdate != null)
                       Text(
-                        'Last updated: ${DateFormat('HH:mm:ss').format(lastUpdate.toLocal())}',
+                        'Updated ${DateTime.now().difference(lastUpdate.toLocal()).inMinutes} min ago (${DateFormat('HH:mm:ss').format(lastUpdate.toLocal())})',
                         style: theme.textTheme.bodySmall,
                       ),
                   ],
