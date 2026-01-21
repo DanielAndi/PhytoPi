@@ -1,5 +1,5 @@
 # PhytoPi
-This project is an IoT-based controlled environment system that enables plants to grow through their entire life cycle with minimal human intervention through use of embedded hardware and software solutions.
+PhytoPi is an IoT-based controlled environment system for supporting a plant throughout its entire growth cycle with minimal human intervention. Utilizing embedded hardware and a machine learning system monitoring the plant using a camera, PhytoPi is designed to automatically care for more than 80% of a plant’s required maintenance over its lifespan. The goal upon completion of a minimum viable product is to support at least one species of plant throughout its growth cycle from germination to harvest/maturity, or for at least for 70 days.
 
 # Compilation and Execution
 <h3>1. Clone the repository</h3>
