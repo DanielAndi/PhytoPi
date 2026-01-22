@@ -137,6 +137,7 @@ class DashboardChart extends StatelessWidget {
                 maxX: maxX,
                 minY: minY,
                 maxY: maxY,
+                clipData: const FlClipData.all(),
                 lineBarsData: [
                   LineChartBarData(
                     spots: dataPoints,

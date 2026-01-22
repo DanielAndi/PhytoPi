@@ -8,6 +8,8 @@ import '../models/device_model.dart';
 import '../models/sensor_model.dart';
 
 class DeviceProvider extends ChangeNotifier {
+  static const int _maxHistoryPoints = 10000; // Store up to ~1 week of minute-by-minute data
+
   List<Device> _devices = [];
   Device? _selectedDevice;
   List<Sensor> _sensors = [];
@@ -145,8 +147,7 @@ class DeviceProvider extends ChangeNotifier {
 
   Future<void> _fetchInitialHistory() async {
     try {
-      // For each sensor, fetch last 24 hours of readings
-      // Limiting to 100 points per sensor for performance for now
+      // For each sensor, fetch initial history (up to limit)
       for (final sensor in _sensors) {
         if (sensor.sensorType == null) continue;
         
@@ -157,7 +158,7 @@ class DeviceProvider extends ChangeNotifier {
             .select('value, ts')
             .eq('sensor_id', sensor.id)
             .order('ts', ascending: false)
-            .limit(50); // Limit history points
+            .limit(_maxHistoryPoints);
             
         final data = response as List<dynamic>;
         if (data.isNotEmpty) {
@@ -240,13 +241,13 @@ class DeviceProvider extends ChangeNotifier {
       // Add new point
       currentHistory.add(FlSpot(newTimestamp, value));
       
-      // Keep only last 50 points, but after sorting to ensure we keep the newest ones
+      // Keep only last N points, but after sorting to ensure we keep the newest ones
       // Sort by X (time) to prevent chart loops
       currentHistory.sort((a, b) => a.x.compareTo(b.x));
       
-      if (currentHistory.length > 50) {
+      if (currentHistory.length > _maxHistoryPoints) {
         // Remove oldest points (first ones after sort)
-        final excess = currentHistory.length - 50;
+        final excess = currentHistory.length - _maxHistoryPoints;
         currentHistory.removeRange(0, excess);
       }
       
