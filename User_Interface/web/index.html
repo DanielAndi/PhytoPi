@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="PhytoPi IoT Dashboard - A comprehensive plant monitoring system">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="PhytoPi Dashboard">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>PhytoPi Dashboard</title>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <div id="loading" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; font-family: sans-serif; z-index: 9999;">
+    <p style="font-size: 18px; margin-bottom: 10px;">Loading PhytoPi Dashboard...</p>
+    <p id="loading-text" style="font-size: 12px; color: #666;">Please wait...</p>
+    <div id="error-container" style="display: none; color: red; margin-top: 20px; max-width: 80vw;">
+      <p id="error-message"></p>
+      <button onclick="window.location.reload(true)" style="margin-top: 10px; padding: 8px 16px; cursor: pointer;">Reload Page</button>
+    </div>
+  </div>
+
+  <script>
+    // PROACTIVE CACHE CLEARING
+    // Automatically unregister service workers to prevent stale caching issues during development.
+    // This ensures the browser always fetches the latest version of the app.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for(let registration of registrations) {
+          registration.unregister().then(function(boolean) {
+            if(boolean) console.log('Unregistered existing service worker.');
+          });
+        }
+      });
+    }
+
+    // Global error handler to catch script errors
+    window.onerror = function(message, source, lineno, colno, error) {
+      var loading = document.getElementById('loading');
+      if (loading && loading.style.display !== 'none') {
+        document.getElementById('loading-text').style.display = 'none';
+        document.getElementById('error-container').style.display = 'block';
+        document.getElementById('error-message').innerText = 'Error: ' + message;
+      }
+    };
+
+    // Timeout handler
+    setTimeout(function() {
+      var loading = document.getElementById('loading');
+      if (loading && loading.style.display !== 'none') {
+        document.getElementById('loading-text').innerText = 'Taking longer than expected...';
+        var reloadBtn = document.createElement('button');
+        reloadBtn.innerText = 'Force Reload';
+        reloadBtn.style.marginTop = '10px';
+        reloadBtn.style.padding = '5px 10px';
+        reloadBtn.onclick = function() {
+          // Clear cache and reload
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(registrations) {
+              for(let registration of registrations) {
+                registration.unregister();
+              }
+              window.location.reload(true);
+            });
+          } else {
+            window.location.reload(true);
+          }
+        };
+        loading.appendChild(reloadBtn);
+      }
+    }, 10000); // 10 seconds timeout
+
+    // Hide loading when Flutter app loads
+    window.addEventListener('flutter-first-frame', function() {
+      var loading = document.getElementById('loading');
+      if (loading) {
+        loading.style.display = 'none';
+      }
+    });
+  </script>
+  
+  <!-- 
+    flutter_bootstrap.js sets up _flutter.buildConfig and automatically
+    calls _flutter.loader.load() with the correct configuration.
+    This is the standard way to initialize Flutter web apps.
+  -->
+  <script src="flutter_bootstrap.js" async onerror="
+    document.getElementById('loading-text').style.display = 'none';
+    document.getElementById('error-container').style.display = 'block';
+    document.getElementById('error-message').innerText = 'Failed to load flutter_bootstrap.js';
+  "></script>
+</body>
+</html>
