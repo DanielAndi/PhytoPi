@@ -40,6 +40,7 @@ node_modules/
 
 # Build outputs
 dist/
+<<<<<<< HEAD
 bin/
 
 # Object files
@@ -50,3 +51,6 @@ bin/
 # SQLite database files
 *.db
 sensor_data.db
+=======
+build/
+>>>>>>> 01cb287a9e697e9da8227d833f491846421f9309
