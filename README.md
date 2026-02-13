@@ -4,4 +4,4 @@ This project is an IoT-based controlled environment system that enables plants t
 [Execution]
 Run 'make clean' first for a fresh compilation.
 Run 'make' to build all the files required for execution.
-Run 'sudo ./main' to run the generated executable.
+Run 'sudo .bin/phytopi' to run the generated executable.
