@@ -1,5 +1,4 @@
 # PhytoPi
-<<<<<<< HEAD
 This project is an IoT-based controlled environment system that enables plants to grow through their entire life cycle with minimal human intervention through use of embedded hardware and software solutions.
 
 [Execution]
@@ -175,4 +174,3 @@ See the [LICENSE](LICENSE) file for details.
 ## Contributing
 
 This is a group project. For contributions, please coordinate with the project team.
->>>>>>> 01cb287a9e697e9da8227d833f491846421f9309
