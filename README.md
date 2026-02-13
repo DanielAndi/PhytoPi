@@ -1,17 +1,15 @@
-# PhytoPi
+## Overview
 This project is an IoT-based controlled environment system that enables plants to grow through their entire life cycle with minimal human intervention through use of embedded hardware and software solutions.
 
-[Execution]
-Run 'make clean' first for a fresh compilation.
-Run 'make' to build all the files required for execution.
-Run 'sudo .bin/phytopi' to run the generated executable.
-=======
+PhytoPi combines a Raspberry Pi-based sensor controller with a modern Flutter dashboard to create a complete plant monitoring ecosystem. The system tracks temperature, humidity, soil moisture, and water levels, while providing real-time data visualization, automated alerts, and AI-powered insights through a responsive web and mobile interface.
 
 An intelligent IoT-based plant monitoring and control system that enables automated plant cultivation through embedded hardware and software solutions. PhytoPi monitors environmental conditions, manages resources, and provides real-time insights to help plants thrive with minimal human intervention.
 
-## Overview
-
-PhytoPi combines a Raspberry Pi-based sensor controller with a modern Flutter dashboard to create a complete plant monitoring ecosystem. The system tracks temperature, humidity, soil moisture, and water levels, while providing real-time data visualization, automated alerts, and AI-powered insights through a responsive web and mobile interface.
+[Execution]
+===========
+      make clean        # Creates a fresh compilation.
+      make              # Builds all the files required for execution.
+      sudo .bin/phytopi # Runs the generated executable.
 
 ## Project Structure
 
