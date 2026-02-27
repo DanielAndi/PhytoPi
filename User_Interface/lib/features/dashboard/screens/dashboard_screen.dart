@@ -103,18 +103,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // ... Kiosk Layout omitted for brevity as we are focusing on Web ...
-  // Keeping the existing method signature but potentially simplifying content if needed.
-  // For this task, I'm assuming Kiosk layout is fine as is or out of scope for "Web testing".
-  // But I need to include the method to avoid errors.
   Widget _buildKioskLayout(BuildContext context) {
-    // Just reusing the scaffold from before but adapting slightly to avoid compilation errors if I removed helper methods
-    // Or I can just paste the original kiosk code back.
-    // Since I'm rewriting the file, I should include it.
-    // I'll use a simplified placeholder for Kiosk to save space if the user didn't ask for it, 
-    // but better to be safe and include a basic version.
-    return Scaffold(
-        body: Center(child: Text("Kiosk Mode (Use Web/Mobile for testing new features)")));
+    return _buildWebLayout(context);
   }
 
 
@@ -291,7 +281,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Consumer<AuthProvider>(
       builder: (context, authProvider, child) {
         final user = authProvider.user;
-        final email = user?.email ?? 'Guest';
+
+        if (user == null) {
+          return _buildKioskSignInForm(context, authProvider, theme);
+        }
+
+        final email = user.email ?? 'Guest';
         final initial = email.isNotEmpty ? email[0].toUpperCase() : '?';
 
         return Center(
@@ -326,8 +321,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     onPressed: () async {
                        await authProvider.signOut();
                        if (context.mounted) {
-                         // Let main.dart Consumer handle the route switch.
-                         // If we were pushed (e.g. from LandingPage), pop to clear the stack.
                          if (Navigator.canPop(context)) {
                            Navigator.pop(context);
                          }
@@ -346,6 +339,81 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildKioskSignInForm(BuildContext context, AuthProvider authProvider, ThemeData theme) {
+    final emailController = TextEditingController();
+    final passwordController = TextEditingController();
+
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 400),
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Icon(Icons.lock_outline, size: 48, color: theme.primaryColor),
+            const SizedBox(height: 16),
+            Text('Sign In', style: theme.textTheme.headlineSmall, textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text(
+              'Sign in to send commands to your device',
+              style: theme.textTheme.bodyMedium?.copyWith(color: theme.textTheme.bodySmall?.color),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            TextField(
+              controller: emailController,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                prefixIcon: Icon(Icons.email_outlined),
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.emailAddress,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: passwordController,
+              decoration: const InputDecoration(
+                labelText: 'Password',
+                prefixIcon: Icon(Icons.lock_outlined),
+                border: OutlineInputBorder(),
+              ),
+              obscureText: true,
+            ),
+            if (authProvider.error != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                authProvider.error!,
+                style: const TextStyle(color: Colors.red),
+                textAlign: TextAlign.center,
+              ),
+            ],
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: authProvider.isLoading
+                  ? null
+                  : () async {
+                      authProvider.clearError();
+                      await authProvider.signIn(
+                        emailController.text.trim(),
+                        passwordController.text,
+                      );
+                    },
+              icon: authProvider.isLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.login),
+              label: const Text('Sign In'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
