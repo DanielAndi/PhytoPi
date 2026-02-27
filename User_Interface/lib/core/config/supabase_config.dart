@@ -51,6 +51,7 @@ class SupabaseConfig {
   static const String usersTable = 'user_profiles';
   static const String userDevicesTable = 'user_devices';
   static const String mlInferencesTable = 'ml_inferences';
+  static const String deviceCommandsTable = 'device_commands';
   
   // Real-time Channels
   static const String readingsChannel = 'readings';

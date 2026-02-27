@@ -1,6 +1,7 @@
 #include "../lib/gpio.h"
 #include "../lib/sql.h"
 #include "../lib/supabase.h"
+#include "../lib/commands.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -253,6 +254,8 @@ int main()
     char sql_light_level[256] = "INSERT INTO light_level_data (light_level, timestamp) VALUES (?, ?);";
 
     time_t last_sync = time(NULL);
+    time_t last_command_poll = time(NULL);
+    int lights_on = 0;
     time_t last_dht_read = 0;  // Track last DHT11 read time (needs 2+ second cooldown)
     int iteration = 0;
 
@@ -388,6 +391,33 @@ int main()
             {
                 sync_to_supabase(db, &supabase_cfg);
                 last_sync = now;
+            }
+
+            // Poll for pending light control commands less frequently than sensor reads
+            if (now - last_command_poll >= 2)
+            {
+                last_command_poll = now;
+
+                int desired_state = 0;
+                char command_id[64] = {0};
+                int cmd_result = fetch_next_light_command(&supabase_cfg, &desired_state, command_id, sizeof(command_id));
+
+                if (cmd_result > 0)
+                {
+                    printf("Received light command: state=%d (current=%d)\n", desired_state, lights_on);
+
+                    if (lights_init() == 0 && lights_set(desired_state) == 0)
+                    {
+                        lights_on = desired_state;
+                        printf("  -> Lights set to %s\n", lights_on ? "ON" : "OFF");
+                        mark_light_command_processed(&supabase_cfg, command_id, "executed");
+                    }
+                    else
+                    {
+                        fprintf(stderr, "Failed to apply light command on GPIO%d\n", LIGHTS_PIN);
+                        mark_light_command_processed(&supabase_cfg, command_id, "failed");
+                    }
+                }
             }
         }
 

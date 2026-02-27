@@ -31,6 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Timer? _autoRefreshTimer;
   int _mobileSelectedIndex = 0;
   int _webSelectedIndex = 0;
+  bool _lightsOn = false;
   late final ScrollController _mobileScrollController = SmoothScrollController(
     pointerScrollDuration: const Duration(milliseconds: 260),
     pointerScrollCurve: Curves.easeOutCubic,
@@ -422,6 +423,55 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               
               if (selectedDevice != null) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Controls',
+                      style: theme.textTheme.titleLarge,
+                    ),
+                    FilledButton.icon(
+                      onPressed: () async {
+                        final targetState = !_lightsOn;
+                        try {
+                          await context
+                              .read<DeviceProvider>()
+                              .toggleGrowLights(targetState);
+                          if (mounted) {
+                            setState(() {
+                              _lightsOn = targetState;
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Grow lights ${targetState ? 'ON' : 'OFF'} command sent',
+                                ),
+                              ),
+                            );
+                          }
+                        } catch (_) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content:
+                                    Text('Failed to send grow lights command'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      icon: Icon(
+                        _lightsOn ? Icons.lightbulb : Icons.lightbulb_outline,
+                      ),
+                      label: Text(
+                        _lightsOn ? 'Turn Lights Off' : 'Turn Lights On',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
                 // GAUGES ROW
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,

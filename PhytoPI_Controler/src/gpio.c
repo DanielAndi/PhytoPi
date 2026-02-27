@@ -5,6 +5,7 @@
 
 static struct gpiod_chip *chip;
 static struct gpiod_line *line;
+static int gpio_initialized = 0;
 
 /*
  * Initialize GPIO library
@@ -17,6 +18,7 @@ int gpio_init(int pin)
     line = gpiod_chip_get_line(chip, pin);
     if (!line)
         return -1;
+    gpio_initialized = 1;
     return 0;
 }
 
@@ -33,6 +35,7 @@ int gpio_config_input(int pin)
  */
 int gpio_config_output(int pin)
 {
+    (void)pin; // pin is already bound when requesting the line
     return gpiod_line_request_output(line, "gpio_app", 0);
 }
 
@@ -57,9 +60,60 @@ int gpio_read()
  */
 int gpio_cleanup()
 {
-    gpiod_line_release(line);
-    gpiod_chip_close(chip);
+    if (line)
+    {
+        gpiod_line_release(line);
+        line = NULL;
+    }
+    if (chip)
+    {
+        gpiod_chip_close(chip);
+        chip = NULL;
+    }
+    gpio_initialized = 0;
     return 0;
+}
+
+/*
+ * -------------------------------
+ * LIGHT CONTROL HELPERS (24V MOSFET ON GPIO17)
+ *-------------------------------
+ */
+
+int lights_init(void)
+{
+    if (!gpio_initialized)
+    {
+        if (gpio_init(LIGHTS_PIN) != 0)
+        {
+            return -1;
+        }
+    }
+
+    if (gpio_config_output(LIGHTS_PIN) != 0)
+    {
+        return -1;
+    }
+
+    // Default to OFF
+    if (gpio_write(0) != 0)
+    {
+        return -1;
+    }
+
+    return 0;
+}
+
+int lights_set(int on)
+{
+    if (!gpio_initialized)
+    {
+        if (lights_init() != 0)
+        {
+            return -1;
+        }
+    }
+    return gpio_write(on ? 1 : 0);
 }
 
 /*

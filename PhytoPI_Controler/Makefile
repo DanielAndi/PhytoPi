@@ -3,7 +3,7 @@ CFLAGS = -Wall -O2 -Ilib
 LDFLAGS = -lgpiod -lpthread -lrt -lsqlite3 -lcurl -ljson-c
 BINDIR = bin
 
-SRC = src/main.c src/gpio.c src/sql.c src/supabase.c
+SRC = src/main.c src/gpio.c src/sql.c src/supabase.c src/commands.c
 OBJ = $(SRC:.c=.o)
 
 TARGET = $(BINDIR)/phytopi

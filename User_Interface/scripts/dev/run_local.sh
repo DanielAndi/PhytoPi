@@ -7,15 +7,19 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Locate Supabase directory (supports repo layouts with infra outside dashboard)
+REPO_ROOT="$PROJECT_ROOT/.."
 if [ -d "$PROJECT_ROOT/infra/supabase" ]; then
     SUPABASE_DIR="$PROJECT_ROOT/infra/supabase"
-elif [ -d "$PROJECT_ROOT/../infra/supabase" ]; then
-    SUPABASE_DIR="$(cd "$PROJECT_ROOT/../infra/supabase" && pwd)"
+elif [ -d "$REPO_ROOT/infra/supabase" ]; then
+    SUPABASE_DIR="$(cd "$REPO_ROOT/infra/supabase" && pwd)"
+elif [ -d "$REPO_ROOT/Data_Infraestructure/supabase" ]; then
+    SUPABASE_DIR="$(cd "$REPO_ROOT/Data_Infraestructure/supabase" && pwd)"
 else
-    echo "❌ Could not find infra/supabase directory."
+    echo "❌ Could not find Supabase directory."
     echo "   Checked:"
     echo "     - $PROJECT_ROOT/infra/supabase"
-    echo "     - $PROJECT_ROOT/../infra/supabase"
+    echo "     - $REPO_ROOT/infra/supabase"
+    echo "     - $REPO_ROOT/Data_Infraestructure/supabase"
     echo ""
     echo "💡 Ensure you have the infra submodule checked out, or update run_local.sh."
     exit 1

@@ -42,6 +42,34 @@ class DeviceProvider extends ChangeNotifier {
     _loadDevices();
   }
 
+  Future<void> toggleGrowLights(bool on) async {
+    if (!SupabaseConfig.isInitialized) {
+      _error = 'Supabase not configured';
+      notifyListeners();
+      return;
+    }
+    if (_selectedDevice == null) {
+      _error = 'No device selected';
+      notifyListeners();
+      return;
+    }
+
+    try {
+      await SupabaseConfig.client!
+          .from(SupabaseConfig.deviceCommandsTable)
+          .insert({
+        'device_id': _selectedDevice!.id,
+        'command_type': 'toggle_light',
+        'payload': {'state': on},
+      });
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('DeviceProvider: Error toggling grow lights: $e');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   Future<void> _loadDevices() async {
     if (!SupabaseConfig.isInitialized) {
       _loadDemoDevices();

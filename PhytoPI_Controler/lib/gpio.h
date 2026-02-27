@@ -18,6 +18,7 @@
 
 #define WATER_LEVEL_PIN 26
 #define DHT22_PIN 21
+#define LIGHTS_PIN 17
 #define DATA_READ_INTERVAL 2 // In seconds
 #define ADS7830_ADDR 0x4b    // Default 7-bit I2C address for ADS7830
 
@@ -28,6 +29,10 @@ int gpio_config_output(int pin);
 int gpio_write(int value);
 int gpio_read();
 int gpio_cleanup();
+
+/* Light control helpers (24V MOSFET on GPIO17) */
+int lights_init(void);
+int lights_set(int on);
 
 /* DHT22 function declarations */
 int read_dht_via_kernel(int *humidity, int *temperature);
