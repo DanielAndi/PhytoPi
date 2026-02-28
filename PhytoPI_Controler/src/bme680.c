@@ -17,11 +17,13 @@
 /* Bosch BME68x API */
 #include "../libs/bme68x/bme68x.h"
 
-#define BME680_I2C_ADDR  0x76
+#define BME680_I2C_ADDR_76  0x76
+#define BME680_I2C_ADDR_77  0x77
 #define IIO_PATH         "/sys/bus/iio/devices"
 #define MAX_PATH         256
 
 static int i2c_fd = -1;
+static uint8_t bme680_i2c_addr = BME680_I2C_ADDR_76;
 static char iio_device_path[MAX_PATH] = {0};
 static int use_iio = 0;
 static struct bme68x_dev bme_dev;
@@ -137,7 +139,7 @@ int bme680_init(void)
     }
     fprintf(stderr, "BME680: No IIO device found in %s\n", IIO_PATH);
 
-    /* Fallback: I2C with Bosch API */
+    /* Fallback: I2C with Bosch API (try 0x76 then 0x77) */
     i2c_fd = open("/dev/i2c-1", O_RDWR);
     if (i2c_fd < 0)
     {
@@ -145,34 +147,38 @@ int bme680_init(void)
         return -1;
     }
 
-    if (ioctl(i2c_fd, I2C_SLAVE, BME680_I2C_ADDR) < 0)
+    const uint8_t addrs[] = { BME680_I2C_ADDR_76, BME680_I2C_ADDR_77 };
+    for (int a = 0; a < 2; a++)
     {
-        fprintf(stderr, "BME680: I2C slave 0x%02x not responding. Try 0x77 if SDO is high. Run: i2cdetect -y 1\n", BME680_I2C_ADDR);
-        close(i2c_fd);
-        i2c_fd = -1;
-        return -1;
+        uint8_t addr = addrs[a];
+        if (ioctl(i2c_fd, I2C_SLAVE, addr) < 0)
+        {
+            fprintf(stderr, "BME680: I2C slave 0x%02x not responding\n", addr);
+            continue;
+        }
+
+        memset(&bme_dev, 0, sizeof(bme_dev));
+        bme_dev.intf = BME68X_I2C_INTF;
+        bme_dev.read = bme68x_linux_i2c_read;
+        bme_dev.write = bme68x_linux_i2c_write;
+        bme_dev.delay_us = bme68x_delay_us;
+        bme_dev.intf_ptr = &i2c_fd;
+        bme_dev.amb_temp = 25;
+
+        if (bme68x_init(&bme_dev) == BME68X_OK)
+        {
+            bme680_i2c_addr = addr;
+            bme_initialized = 1;
+            use_iio = 0;
+            fprintf(stderr, "BME680: I2C init OK (addr 0x%02x)\n", addr);
+            return 0;
+        }
     }
 
-    memset(&bme_dev, 0, sizeof(bme_dev));
-    bme_dev.intf = BME68X_I2C_INTF;
-    bme_dev.read = bme68x_linux_i2c_read;
-    bme_dev.write = bme68x_linux_i2c_write;
-    bme_dev.delay_us = bme68x_delay_us;
-    bme_dev.intf_ptr = &i2c_fd;
-    bme_dev.amb_temp = 25;
-
-    if (bme68x_init(&bme_dev) != BME68X_OK)
-    {
-        fprintf(stderr, "BME680: Bosch API init failed. Check wiring (SDA=GPIO2, SCL=GPIO3, VCC, GND).\n");
-        close(i2c_fd);
-        i2c_fd = -1;
-        return -1;
-    }
-
-    bme_initialized = 1;
-    use_iio = 0;
-    fprintf(stderr, "BME680: I2C init OK (addr 0x%02x)\n", BME680_I2C_ADDR);
-    return 0;
+    fprintf(stderr, "BME680: Bosch API init failed at 0x76 and 0x77. Check wiring (SDA=GPIO2, SCL=GPIO3, VCC, GND).\n");
+    close(i2c_fd);
+    i2c_fd = -1;
+    return -1;
 }
 
 int bme680_read(bme680_data_t *data)

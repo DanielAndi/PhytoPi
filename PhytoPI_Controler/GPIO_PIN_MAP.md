@@ -15,7 +15,7 @@
 | Device | Address | Notes |
 |--------|---------|-------|
 | ADS7830 (ADC) | 0x4b | Ch0: soil, Ch1: light, Ch2: water (legacy) |
-| BME680 | 0x76 | Temp, humidity, pressure, gas |
+| BME680 | 0x76 or 0x77 | Temp, humidity, pressure, gas (SDO low→0x76, high→0x77) |
 
 ## Environment Variables
 
