@@ -371,6 +371,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   : () async {
                       authProvider.clearError();
                       await authProvider.signInWithOAuth(OAuthProvider.google);
+                      if (context.mounted && authProvider.error == null) {
+                        await context.read<DeviceProvider>().refreshDevices();
+                      }
                     },
               icon: const Icon(Icons.g_mobiledata, size: 24),
               label: const Text('Sign in with Google'),
@@ -418,6 +421,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         emailController.text.trim(),
                         passwordController.text,
                       );
+                      if (context.mounted && authProvider.error == null) {
+                        await context.read<DeviceProvider>().refreshDevices();
+                      }
                     },
               icon: authProvider.isLoading
                   ? const SizedBox(

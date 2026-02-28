@@ -3,6 +3,7 @@
 #include <json-c/json.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 struct memory_buffer {
     char *data;
@@ -166,9 +167,15 @@ int mark_light_command_processed(const supabase_config_t *cfg, const char *comma
     headers = curl_slist_append(headers, "Content-Type: application/json");
     headers = curl_slist_append(headers, "Prefer: return=minimal");
 
+    time_t now_sec = time(NULL);
+    struct tm tm_buf;
+    gmtime_r(&now_sec, &tm_buf);
+    char iso_buf[32];
+    strftime(iso_buf, sizeof(iso_buf), "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
+
     json_object *body = json_object_new_object();
     json_object_object_add(body, "status", json_object_new_string(status));
-    json_object_object_add(body, "executed_at", json_object_new_string("now()"));
+    json_object_object_add(body, "executed_at", json_object_new_string(iso_buf));
 
     const char *body_str = json_object_to_json_string(body);
 

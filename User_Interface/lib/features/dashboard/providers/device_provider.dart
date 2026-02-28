@@ -42,6 +42,11 @@ class DeviceProvider extends ChangeNotifier {
     _loadDevices();
   }
 
+  /// Reload devices from Supabase (e.g. after user signs in on kiosk).
+  Future<void> refreshDevices() async {
+    await _loadDevices();
+  }
+
   Future<void> toggleGrowLights(bool on) async {
     if (!SupabaseConfig.isInitialized) {
       _error = 'Supabase not configured';

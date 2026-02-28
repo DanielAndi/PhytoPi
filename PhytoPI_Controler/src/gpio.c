@@ -6,6 +6,7 @@
 static struct gpiod_chip *chip;
 static struct gpiod_line *line;
 static int gpio_initialized = 0;
+static int lights_initialized = 0;
 
 /*
  * Initialize GPIO library
@@ -71,6 +72,7 @@ int gpio_cleanup()
         chip = NULL;
     }
     gpio_initialized = 0;
+    lights_initialized = 0;  /* allow lights_init to run again if restarted */
     return 0;
 }
 
@@ -82,36 +84,32 @@ int gpio_cleanup()
 
 int lights_init(void)
 {
+    /* Only request the line once; re-requesting an already requested line fails in libgpiod */
+    if (lights_initialized)
+        return 0;
+
     if (!gpio_initialized)
     {
         if (gpio_init(LIGHTS_PIN) != 0)
-        {
             return -1;
-        }
     }
 
     if (gpio_config_output(LIGHTS_PIN) != 0)
-    {
         return -1;
-    }
 
-    // Default to OFF
     if (gpio_write(0) != 0)
-    {
         return -1;
-    }
 
+    lights_initialized = 1;
     return 0;
 }
 
 int lights_set(int on)
 {
-    if (!gpio_initialized)
+    if (!lights_initialized)
     {
         if (lights_init() != 0)
-        {
             return -1;
-        }
     }
     return gpio_write(on ? 1 : 0);
 }
