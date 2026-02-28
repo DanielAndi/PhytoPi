@@ -1,9 +1,9 @@
 CC = gcc
-CFLAGS = -Wall -O2 -Ilib
+CFLAGS = -Wall -O2 -Ilib -Ilibs/bme68x
 LDFLAGS = -lgpiod -lpthread -lrt -lsqlite3 -lcurl -ljson-c
 BINDIR = bin
 
-SRC = src/main.c src/gpio.c src/sql.c src/supabase.c src/commands.c
+SRC = src/main.c src/gpio.c src/sql.c src/supabase.c src/commands.c src/bme680.c libs/bme68x/bme68x.c
 OBJ = $(SRC:.c=.o)
 
 TARGET = $(BINDIR)/phytopi

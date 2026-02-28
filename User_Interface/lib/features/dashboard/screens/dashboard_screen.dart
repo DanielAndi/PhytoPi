@@ -13,7 +13,6 @@ import '../providers/device_provider.dart';
 import 'charts_screen.dart';
 import 'alerts_screen.dart';
 import 'devices_screen.dart';
-import 'camera_screen.dart';
 import 'ai_health_screen.dart';
 import '../../settings/screens/profile_screen.dart';
 import '../../support/screens/help_support_screen.dart';
@@ -32,7 +31,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Timer? _autoRefreshTimer;
   int _mobileSelectedIndex = 0;
   int _webSelectedIndex = 0;
-  bool _lightsOn = false;
   late final ScrollController _mobileScrollController = SmoothScrollController(
     pointerScrollDuration: const Duration(milliseconds: 260),
     pointerScrollCurve: Curves.easeOutCubic,
@@ -127,7 +125,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const DevicesScreen(),
           const ChartsScreen(),
           const AlertsScreen(),
-          const CameraScreen(),
+          const AiHealthScreen(),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -138,8 +136,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
           BottomNavigationBarItem(icon: Icon(Icons.devices), label: 'Devices'),
           BottomNavigationBarItem(icon: Icon(Icons.bar_chart), label: 'Charts'),
-          BottomNavigationBarItem(icon: Icon(Icons.notifications), label: 'Alerts'),
-          BottomNavigationBarItem(icon: Icon(Icons.videocam), label: 'Camera'),
+          BottomNavigationBarItem(icon: Icon(Icons.notifications), label: 'Alerts & Cmd'),
+          BottomNavigationBarItem(icon: Icon(Icons.health_and_safety), label: 'AI Health'),
         ],
       ),
     );
@@ -244,12 +242,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               NavigationRailDestination(
                 icon: Icon(Icons.notifications_outlined),
                 selectedIcon: Icon(Icons.notifications),
-                label: Text('Alerts'),
+                label: Text('Alerts & Cmd'),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.videocam_outlined),
-                selectedIcon: Icon(Icons.videocam),
-                label: Text('Camera'),
+                icon: Icon(Icons.health_and_safety_outlined),
+                selectedIcon: Icon(Icons.health_and_safety),
+                label: Text('AI Health'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.person_outline),
@@ -267,7 +265,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const DevicesScreen(),
                 const ChartsScreen(),
                 const AlertsScreen(),
-                const CameraScreen(),
+                const AiHealthScreen(),
                 _buildProfileView(context),
               ],
             ),
@@ -514,55 +512,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               
               if (selectedDevice != null) ...[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Controls',
-                      style: theme.textTheme.titleLarge,
+                if (deviceProvider.hasWaterLevelLowAlert)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.15),
+                      border: Border.all(color: Colors.red),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    FilledButton.icon(
-                      onPressed: () async {
-                        final targetState = !_lightsOn;
-                        try {
-                          await context
-                              .read<DeviceProvider>()
-                              .toggleGrowLights(targetState);
-                          if (mounted) {
+                    child: Row(
+                      children: [
+                        const Icon(Icons.water_drop, color: Colors.red, size: 32),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Water Level Low',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                    color: Colors.red[900], fontWeight: FontWeight.bold),
+                              ),
+                              const Text('Refill the reservoir. See Alerts & Commands for details.'),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () {
                             setState(() {
-                              _lightsOn = targetState;
+                              if (PlatformDetector.isWeb) _webSelectedIndex = 3;
+                              else _mobileSelectedIndex = 3;
                             });
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Grow lights ${targetState ? 'ON' : 'OFF'} command sent',
-                                ),
-                              ),
-                            );
-                          }
-                        } catch (_) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content:
-                                    Text('Failed to send grow lights command'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-                          }
-                        }
-                      },
-                      icon: Icon(
-                        _lightsOn ? Icons.lightbulb : Icons.lightbulb_outline,
-                      ),
-                      label: Text(
-                        _lightsOn ? 'Turn Lights Off' : 'Turn Lights On',
-                      ),
+                          },
+                          child: const Text('View Alerts'),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
+                  ),
                 // GAUGES ROW
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -643,6 +630,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             max: 100,
                             unit: '%',
                             color: Colors.cyan,
+                          ),
+                        ),
+                        SizedBox(
+                          width: (width - (16 * (count - 1))) / count,
+                          height: 250,
+                          child: DashboardGauge(
+                            title: 'Pressure',
+                            value: latestReadings['pressure'] ?? 0,
+                            min: 900,
+                            max: 1100,
+                            unit: 'hPa',
+                            color: Colors.purple,
+                          ),
+                        ),
+                        SizedBox(
+                          width: (width - (16 * (count - 1))) / count,
+                          height: 250,
+                          child: DashboardGauge(
+                            title: 'Gas / VOC',
+                            value: latestReadings['gas_resistance'] ?? 0,
+                            min: 0,
+                            max: 500,
+                            unit: 'kOhm',
+                            color: Colors.teal,
                           ),
                         ),
                       ],

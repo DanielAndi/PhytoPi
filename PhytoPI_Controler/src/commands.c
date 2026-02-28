@@ -143,7 +143,92 @@ int fetch_next_light_command(const supabase_config_t *cfg, int *desired_state, c
     return 1;
 }
 
-int mark_light_command_processed(const supabase_config_t *cfg, const char *command_id, const char *status)
+int fetch_next_command(const supabase_config_t *cfg, device_command_t *cmd)
+{
+    if (!cfg || !cfg->api_url || !cfg->api_key || !cfg->device_id || !cmd)
+        return -1;
+
+    CURL *curl = curl_easy_init();
+    if (!curl)
+        return -1;
+
+    char url[512];
+    snprintf(url, sizeof(url),
+             "%s/rest/v1/device_commands?device_id=eq.%s&status=eq.pending&order=created_at.asc&limit=1",
+             cfg->api_url, cfg->device_id);
+
+    struct curl_slist *headers = NULL;
+    char apikey_header[256];
+    char auth_header[256];
+    snprintf(apikey_header, sizeof(apikey_header), "apikey: %s", cfg->api_key);
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", cfg->api_key);
+    headers = curl_slist_append(headers, apikey_header);
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Accept: application/json");
+
+    struct memory_buffer chunk = {0};
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_memory_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+
+    CURLcode res = curl_easy_perform(curl);
+    long response_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK || response_code < 200 || response_code >= 300)
+    {
+        if (chunk.data) free(chunk.data);
+        return -1;
+    }
+
+    if (!chunk.data || chunk.size == 0)
+    {
+        free(chunk.data);
+        return 0;
+    }
+
+    json_object *root = json_tokener_parse(chunk.data);
+    free(chunk.data);
+    if (!root || !json_object_is_type(root, json_type_array))
+    {
+        if (root) json_object_put(root);
+        return 0;
+    }
+    if (json_object_array_length(root) == 0)
+    {
+        json_object_put(root);
+        return 0;
+    }
+
+    json_object *c = json_object_array_get_idx(root, 0);
+    json_object *id_obj = NULL, *type_obj = NULL, *payload_obj = NULL;
+    if (!json_object_object_get_ex(c, "id", &id_obj) || !json_object_object_get_ex(c, "command_type", &type_obj) ||
+        !json_object_object_get_ex(c, "payload", &payload_obj))
+    {
+        json_object_put(root);
+        return -1;
+    }
+
+    const char *id_str = json_object_get_string(id_obj);
+    const char *type_str = json_object_get_string(type_obj);
+    const char *payload_str = json_object_to_json_string(payload_obj);
+    if (!id_str || !type_str || !payload_str)
+    {
+        json_object_put(root);
+        return -1;
+    }
+
+    snprintf(cmd->id, sizeof(cmd->id), "%s", id_str);
+    snprintf(cmd->command_type, sizeof(cmd->command_type), "%s", type_str);
+    snprintf(cmd->payload_json, sizeof(cmd->payload_json), "%s", payload_str);
+    json_object_put(root);
+    return 1;
+}
+
+int mark_command_processed(const supabase_config_t *cfg, const char *command_id, const char *status)
 {
     if (!cfg || !cfg->api_url || !cfg->api_key || !command_id || !status)
         return -1;

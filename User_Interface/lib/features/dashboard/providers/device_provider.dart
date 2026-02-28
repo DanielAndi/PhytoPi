@@ -26,8 +26,11 @@ class DeviceProvider extends ChangeNotifier {
   bool _hasReadings = false;
   
   RealtimeChannel? _readingsSubscription;
+  RealtimeChannel? _alertsSubscription;
+  List<Map<String, dynamic>> _alerts = [];
 
   List<Device> get devices => _devices;
+  List<Map<String, dynamic>> get alerts => _alerts;
   Device? get selectedDevice => _selectedDevice;
   List<Sensor> get sensors => _sensors;
   bool get isLoading => _isLoading;
@@ -47,7 +50,7 @@ class DeviceProvider extends ChangeNotifier {
     await _loadDevices();
   }
 
-  Future<void> toggleGrowLights(bool on) async {
+  Future<void> _sendCommand(String commandType, Map<String, dynamic> payload) async {
     if (!SupabaseConfig.isInitialized) {
       _error = 'Supabase not configured';
       notifyListeners();
@@ -58,18 +61,73 @@ class DeviceProvider extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.deviceCommandsTable)
+        .insert({
+      'device_id': _selectedDevice!.id,
+      'command_type': commandType,
+      'payload': payload,
+    });
+  }
 
+  Future<void> toggleGrowLights(bool on) async {
     try {
-      await SupabaseConfig.client!
-          .from(SupabaseConfig.deviceCommandsTable)
-          .insert({
-        'device_id': _selectedDevice!.id,
-        'command_type': 'toggle_light',
-        'payload': {'state': on},
-      });
+      await _sendCommand('toggle_light', {'state': on});
     } catch (e) {
       _error = e.toString();
       debugPrint('DeviceProvider: Error toggling grow lights: $e');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> togglePump(bool on, {int? durationSec}) async {
+    try {
+      final payload = <String, dynamic>{'state': on};
+      if (durationSec != null) payload['duration_sec'] = durationSec;
+      await _sendCommand('toggle_pump', payload);
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('DeviceProvider: Error toggling pump: $e');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> toggleFans(bool on) async {
+    try {
+      await _sendCommand('toggle_fans', {'state': on});
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('DeviceProvider: Error toggling fans: $e');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> setFanSpeed(int fanId, int dutyPercent) async {
+    try {
+      await _sendCommand('set_fan_speed', {
+        'fan_id': fanId,
+        'duty_percent': dutyPercent.clamp(0, 100),
+      });
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('DeviceProvider: Error setting fan speed: $e');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> runVentilation({int durationSec = 300, int dutyPercent = 80}) async {
+    try {
+      await _sendCommand('run_ventilation', {
+        'duration_sec': durationSec,
+        'duty_percent': dutyPercent,
+      });
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('DeviceProvider: Error running ventilation: $e');
       notifyListeners();
       rethrow;
     }
@@ -127,6 +185,7 @@ class DeviceProvider extends ChangeNotifier {
     _latestReadings.clear();
     _historicalReadings.clear();
     _sensors.clear();
+    _alerts.clear();
     _lastUpdate = null;
     _hasReadings = false;
     
@@ -168,6 +227,8 @@ class DeviceProvider extends ChangeNotifier {
         await _fetchInitialHistory();
         _subscribeToReadings();
       }
+      await _fetchAlerts(deviceId);
+      _subscribeToAlerts(deviceId);
       
     } catch (e) {
       _error = e.toString();
@@ -297,7 +358,52 @@ class DeviceProvider extends ChangeNotifier {
       SupabaseConfig.client?.removeChannel(_readingsSubscription!);
       _readingsSubscription = null;
     }
+    if (_alertsSubscription != null) {
+      SupabaseConfig.client?.removeChannel(_alertsSubscription!);
+      _alertsSubscription = null;
+    }
   }
+
+  Future<void> _fetchAlerts(String deviceId) async {
+    try {
+      final response = await SupabaseConfig.client!
+          .from(SupabaseConfig.alertsTable)
+          .select()
+          .eq('device_id', deviceId)
+          .order('triggered_at', ascending: false)
+          .limit(50);
+      _alerts = List<Map<String, dynamic>>.from(response as List);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('DeviceProvider: Error fetching alerts: $e');
+    }
+  }
+
+  void _subscribeToAlerts(String deviceId) {
+    if (_alertsSubscription != null) {
+      SupabaseConfig.client?.removeChannel(_alertsSubscription!);
+      _alertsSubscription = null;
+    }
+    _alertsSubscription = SupabaseConfig.client!
+        .channel('alerts_$deviceId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: SupabaseConfig.alertsTable,
+          callback: (payload) {
+            final record = Map<String, dynamic>.from(payload.newRecord);
+            if (record['device_id'] == deviceId) {
+              _alerts.insert(0, record);
+              notifyListeners();
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  bool get hasWaterLevelLowAlert =>
+      _alerts.any((a) =>
+          a['type'] == 'water_level_low' && a['resolved_at'] == null);
   
   // Demo Mode Simulation
   Timer? _demoTimer;
