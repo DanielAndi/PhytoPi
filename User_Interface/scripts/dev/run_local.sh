@@ -56,17 +56,17 @@ else
 fi
 
 # Parse Supabase configuration from status output
-# Newer Supabase CLI uses "Publishable key" instead of "anon key"
-# Extract Publishable key (supports both "Publishable key:" and "anon key" formats)
-ANON_KEY=$(echo "$STATUS_OUTPUT" | grep -i "Publishable key" | awk -F': ' '{print $2}' | tr -d '[:space:]' | head -1)
+# Newer Supabase CLI uses a box-drawing table format: │ Publishable │ <key> │
+# Extract Publishable key — matches both table format and legacy "key: value" format
+ANON_KEY=$(echo "$STATUS_OUTPUT" | grep -i "Publishable" | grep -v "Secret" | awk -F'│' '{print $3}' | tr -d '[:space:]' | head -1)
 
 # Fallback to old "anon key" format if new format not found
 if [ -z "$ANON_KEY" ]; then
     ANON_KEY=$(echo "$STATUS_OUTPUT" | grep -i "anon key" | awk '{print $NF}' | head -1)
 fi
 
-# Get API URL (usually the last field on the line)
-API_URL=$(echo "$STATUS_OUTPUT" | grep "API URL" | awk '{print $NF}' | head -1)
+# Get API URL — newer CLI shows "Project URL", older shows "API URL"
+API_URL=$(echo "$STATUS_OUTPUT" | grep -i "Project URL\|API URL" | awk -F'│' '{print $3}' | tr -d '[:space:]' | head -1)
 
 # Fallback to default if not found
 if [ -z "$API_URL" ]; then

@@ -193,4 +193,3 @@ int mark_light_command_processed(const supabase_config_t *cfg, const char *comma
 
     return 0;
 }
-

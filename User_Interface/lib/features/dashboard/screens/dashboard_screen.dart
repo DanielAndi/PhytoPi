@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:phytopi_dashboard/shared/controllers/smooth_scroll_controller.dart';
 import '../../../core/platform/platform_detector.dart';
 import '../../../core/config/app_config.dart';
@@ -363,7 +364,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: theme.textTheme.bodyMedium?.copyWith(color: theme.textTheme.bodySmall?.color),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
+            OutlinedButton.icon(
+              onPressed: authProvider.isLoading
+                  ? null
+                  : () async {
+                      authProvider.clearError();
+                      await authProvider.signInWithOAuth(OAuthProvider.google);
+                    },
+              icon: const Icon(Icons.g_mobiledata, size: 24),
+              label: const Text('Sign in with Google'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(children: [const Expanded(child: Divider()), Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('or', style: theme.textTheme.bodySmall)), const Expanded(child: Divider())]),
+            const SizedBox(height: 24),
             TextField(
               controller: emailController,
               decoration: const InputDecoration(
