@@ -252,21 +252,16 @@ int main()
         fprintf(stderr, "To enable I2C: sudo raspi-config -> Interface Options -> I2C -> Enable\n");
     }
 
-    // Variables to hold sensor data
-    int humidity = -1;      // Initialize to -1 (error state)
-    int temperature = -1;   // Initialize to -1 (error state)
+    // Variables to hold sensor data (temp/humidity from BME680, not DHT11)
     int soil_moisture = 0;
     int water_level = 0;
     int light_level = 0;
 
     // State variables for Deadband/Heartbeat logic
-    int last_humidity = -999;
-    int last_temperature = -999;
     int last_soil_moisture = -999;
     int last_water_level = -999;
     int last_light_level = -999;
 
-    time_t last_env_ts = 0;   // Last time temp/humidity was sent
     time_t last_soil_ts = 0;  // Last time soil moisture was sent
     time_t last_water_ts = 0; // Last time water level was sent
     time_t last_light_ts = 0; // Last time light level was sent
@@ -333,9 +328,8 @@ int main()
 
     /* Sensor health: consecutive failure counts */
     int bme680_fail_count = 0;
-    int ads7830_fail_count = 0;
     int photoelectric_fail_count = 0;
-    static time_t last_bme_alert = 0, last_ads_alert = 0, last_photo_alert = 0;
+    static time_t last_bme_alert = 0, last_photo_alert = 0;
 
     // BME680 init (replaces DHT11)
     float bme_temp = -999, bme_hum = -999, bme_pressure = -999, bme_gas = -999;
@@ -421,8 +415,8 @@ int main()
             printf("  -> Ventilation auto-off (timeout)\n");
         }
 
-        printf("[%ld] Soil=%d Water=%d Light=%d T=%.1fC H=%.1f%% P=%.1f hPa G=%.1f Photo=%dHz\n",
-               now, soil_moisture, water_level, light_level, bme_temp, bme_hum, bme_pressure, bme_gas, photo_freq);
+        printf("[%ld] L=%d Soil=%d Water=%d Light=%d T=%.1fC H=%.1f%% P=%.1f hPa G=%.1f Photo=%dHz\n",
+               now, lights_on, soil_moisture, water_level, light_level, bme_temp, bme_hum, bme_pressure, bme_gas, photo_freq);
 
         int timestamp = (int)now;
 
