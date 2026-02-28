@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -131,16 +132,22 @@ int bme680_init(void)
     if (find_bme680_iio() == 0)
     {
         use_iio = 1;
+        fprintf(stderr, "BME680: Using IIO at %s\n", iio_device_path);
         return 0;
     }
+    fprintf(stderr, "BME680: No IIO device found in %s\n", IIO_PATH);
 
     /* Fallback: I2C with Bosch API */
     i2c_fd = open("/dev/i2c-1", O_RDWR);
     if (i2c_fd < 0)
+    {
+        fprintf(stderr, "BME680: Cannot open /dev/i2c-1 (errno=%d). Check: i2c enabled, user in i2c group.\n", errno);
         return -1;
+    }
 
     if (ioctl(i2c_fd, I2C_SLAVE, BME680_I2C_ADDR) < 0)
     {
+        fprintf(stderr, "BME680: I2C slave 0x%02x not responding. Try 0x77 if SDO is high. Run: i2cdetect -y 1\n", BME680_I2C_ADDR);
         close(i2c_fd);
         i2c_fd = -1;
         return -1;
@@ -156,6 +163,7 @@ int bme680_init(void)
 
     if (bme68x_init(&bme_dev) != BME68X_OK)
     {
+        fprintf(stderr, "BME680: Bosch API init failed. Check wiring (SDA=GPIO2, SCL=GPIO3, VCC, GND).\n");
         close(i2c_fd);
         i2c_fd = -1;
         return -1;
@@ -163,6 +171,7 @@ int bme680_init(void)
 
     bme_initialized = 1;
     use_iio = 0;
+    fprintf(stderr, "BME680: I2C init OK (addr 0x%02x)\n", BME680_I2C_ADDR);
     return 0;
 }
 
