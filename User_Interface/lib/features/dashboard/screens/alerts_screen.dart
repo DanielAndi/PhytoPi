@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../providers/device_provider.dart';
@@ -65,6 +66,7 @@ class _AlertsScreenState extends State<AlertsScreen>
             )
           : TabBarView(
               controller: _tabController,
+              physics: const NeverScrollableScrollPhysics(),
               children: [
                 _buildAlertsTab(deviceProvider),
                 _buildCommandsTab(deviceProvider),
@@ -82,6 +84,7 @@ class _AlertsScreenState extends State<AlertsScreen>
 
     return ListView(
       padding: const EdgeInsets.all(16),
+      dragStartBehavior: DragStartBehavior.down,
       children: [
         // Active Alerts
         Text('Active Alerts', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
@@ -208,6 +211,7 @@ class _AlertsScreenState extends State<AlertsScreen>
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
+      dragStartBehavior: DragStartBehavior.down,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -337,6 +341,7 @@ class _AlertsScreenState extends State<AlertsScreen>
 
     return ListView(
       padding: const EdgeInsets.all(16),
+      dragStartBehavior: DragStartBehavior.down,
       children: [
         Text(
           'Automate lights, pump, or ventilation. The device checks schedules every 60 seconds.',
@@ -774,6 +779,7 @@ class _AlertsScreenState extends State<AlertsScreen>
 
     return ListView(
       padding: const EdgeInsets.all(16),
+      dragStartBehavior: DragStartBehavior.down,
       children: [
         Text(
           'Thresholds define min/max ranges for alerts. The device checks every 60 seconds.',
