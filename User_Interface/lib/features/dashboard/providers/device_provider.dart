@@ -152,9 +152,18 @@ class DeviceProvider extends ChangeNotifier {
           .from(SupabaseConfig.devicesTable)
           .select('id, name, last_seen, status, updated_at, created_at, registered_at')
           .order('created_at');
-      
+
       final data = response as List<dynamic>;
-      _devices = data.map((json) => Device.fromJson(json)).toList();
+      final lastReadingByDevice = await _fetchLatestReadingByDevice();
+      _devices = data.map((json) {
+        final row = Map<String, dynamic>.from(json as Map);
+        final deviceId = row['id']?.toString();
+        final lastReadingAt = deviceId != null ? lastReadingByDevice[deviceId] : null;
+        if (lastReadingAt != null) {
+          row['last_reading_at'] = lastReadingAt.toUtc().toIso8601String();
+        }
+        return Device.fromJson(row);
+      }).toList();
       
       // Auto-select first device if none selected
       if (_selectedDevice == null && _devices.isNotEmpty) {
@@ -198,6 +207,7 @@ class DeviceProvider extends ChangeNotifier {
                 'name': record['name'] ?? existing.name,
                 'status': record['status'],
                 'last_seen': record['last_seen'] ?? existing.lastSeen?.toUtc().toIso8601String(),
+                'last_reading_at': existing.lastReadingAt?.toUtc().toIso8601String(),
                 'updated_at': record['updated_at'],
                 'is_online': record['is_online'],
               };
@@ -225,6 +235,42 @@ class DeviceProvider extends ChangeNotifier {
         _loadDevices(silent: true);
       }
     });
+  }
+
+  Future<Map<String, DateTime>> _fetchLatestReadingByDevice() async {
+    final out = <String, DateTime>{};
+    try {
+      // Fallback online signal: if readings are arriving recently, device is active.
+      final cutoff = DateTime.now().toUtc().subtract(const Duration(seconds: 120)).toIso8601String();
+      final response = await SupabaseConfig.client!
+          .from(SupabaseConfig.readingsTable)
+          .select('ts, sensors!inner(device_id)')
+          .gte('ts', cutoff)
+          .order('ts', ascending: false)
+          .limit(1000);
+
+      for (final item in (response as List<dynamic>)) {
+        final row = Map<String, dynamic>.from(item as Map);
+        final tsRaw = row['ts']?.toString();
+        if (tsRaw == null || tsRaw.isEmpty) continue;
+        final ts = DateTime.tryParse(tsRaw);
+        if (ts == null) continue;
+
+        final sensorsObj = row['sensors'];
+        String? deviceId;
+        if (sensorsObj is Map<String, dynamic>) {
+          deviceId = sensorsObj['device_id']?.toString();
+        } else if (sensorsObj is List && sensorsObj.isNotEmpty && sensorsObj.first is Map<String, dynamic>) {
+          deviceId = (sensorsObj.first as Map<String, dynamic>)['device_id']?.toString();
+        }
+        if (deviceId == null || deviceId.isEmpty) continue;
+
+        out.putIfAbsent(deviceId, () => ts);
+      }
+    } catch (e) {
+      debugPrint('DeviceProvider: readings-based online fallback unavailable: $e');
+    }
+    return out;
   }
 
   void _loadDemoDevices() {

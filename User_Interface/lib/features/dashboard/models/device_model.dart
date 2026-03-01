@@ -2,36 +2,41 @@ class Device {
   final String id;
   final String name;
   final DateTime? lastSeen;
-  final bool _statusActive;
+  final DateTime? lastReadingAt;
   final bool _isOnlineOverride;
 
   Device({
     required this.id,
     required this.name,
     this.lastSeen,
-    bool statusActive = false,
+    this.lastReadingAt,
     bool isOnlineOverride = false,
-  })  : _statusActive = statusActive,
-        _isOnlineOverride = isOnlineOverride;
+  }) : _isOnlineOverride = isOnlineOverride;
 
-  /// Online if last_seen within 90 seconds (heartbeat from Pi). Status 'active' means
-  /// device is enabled, not that it's currently connected — use last_seen for that.
+  /// Online if either heartbeat (`last_seen`) or incoming readings are recent.
   bool get isOnline {
     const offlineTimeout = Duration(seconds: 90);
     if (_isOnlineOverride) return true; // Manual override for testing only
-    if (lastSeen == null) return false;
-    return DateTime.now().difference(lastSeen!) < offlineTimeout;
+    DateTime? activity = lastSeen;
+    if (lastReadingAt != null && (activity == null || lastReadingAt!.isAfter(activity))) {
+      activity = lastReadingAt;
+    }
+    if (activity == null) return false;
+    return DateTime.now().toUtc().difference(activity.toUtc()) < offlineTimeout;
   }
 
   factory Device.fromJson(Map<String, dynamic> json) {
+    final lastReadingAt = json['last_reading_at'] != null
+        ? DateTime.parse(json['last_reading_at'])
+        : null;
     final lastSeen = json['last_seen'] != null
         ? DateTime.parse(json['last_seen'])
-        : (json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null);
+        : (lastReadingAt ?? (json['updated_at'] != null ? DateTime.parse(json['updated_at']) : null));
     return Device(
       id: json['id'] ?? '',
       name: json['name'] ?? 'Unknown Device',
       lastSeen: lastSeen,
-      statusActive: json['status'] == 'active',
+      lastReadingAt: lastReadingAt,
       isOnlineOverride: json['is_online'] == true,
     );
   }
