@@ -16,6 +16,7 @@ class _AlertsScreenState extends State<AlertsScreen>
   bool _lightsOn = false;
   bool _pumpOn = false;
   bool _fansOn = false;
+  String? _historySeverityFilter; // null = all, 'critical', 'high', 'medium', 'low'
 
   @override
   void initState() {
@@ -67,8 +68,8 @@ class _AlertsScreenState extends State<AlertsScreen>
               children: [
                 _buildAlertsTab(deviceProvider),
                 _buildCommandsTab(deviceProvider),
-                _buildSchedulesTab(),
-                _buildThresholdsTab(),
+                _buildSchedulesTab(deviceProvider),
+                _buildThresholdsTab(deviceProvider),
               ],
             ),
     );
@@ -76,57 +77,129 @@ class _AlertsScreenState extends State<AlertsScreen>
 
   Widget _buildAlertsTab(DeviceProvider deviceProvider) {
     final theme = Theme.of(context);
-    final alerts = deviceProvider.alerts;
+    final activeAlerts = deviceProvider.activeAlerts;
+    final alertHistory = deviceProvider.alertHistory;
 
-    if (alerts.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // Active Alerts
+        Text('Active Alerts', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        if (activeAlerts.isEmpty)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Row(
+                children: [
+                  Icon(Icons.check_circle_outline, size: 48, color: Colors.green[300]),
+                  const SizedBox(width: 16),
+                  Text('No active alerts', style: theme.textTheme.bodyLarge),
+                ],
+              ),
+            ),
+          )
+        else
+          ...activeAlerts.map((a) => _buildAlertCard(theme, deviceProvider, a, resolved: false)),
+        const SizedBox(height: 24),
+        // Alert History
+        Text('Alert History', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
           children: [
-            Icon(Icons.check_circle_outline, size: 64, color: Colors.green[300]),
-            const SizedBox(height: 16),
-            Text('No alerts', style: theme.textTheme.titleMedium),
+            FilterChip(
+              label: const Text('All'),
+              selected: _historySeverityFilter == null,
+              onSelected: (_) => setState(() => _historySeverityFilter = null),
+            ),
+            FilterChip(
+              label: const Text('Critical'),
+              selected: _historySeverityFilter == 'critical',
+              onSelected: (_) => setState(() => _historySeverityFilter = 'critical'),
+            ),
+            FilterChip(
+              label: const Text('High'),
+              selected: _historySeverityFilter == 'high',
+              onSelected: (_) => setState(() => _historySeverityFilter = 'high'),
+            ),
+            FilterChip(
+              label: const Text('Medium'),
+              selected: _historySeverityFilter == 'medium',
+              onSelected: (_) => setState(() => _historySeverityFilter = 'medium'),
+            ),
           ],
         ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: alerts.length,
-      itemBuilder: (context, i) {
-        final a = alerts[i];
-        final type = a['type'] as String? ?? '';
-        final message = a['message'] as String? ?? '';
-        final severity = a['severity'] as String? ?? 'medium';
-        final triggered = a['triggered_at'] != null
-            ? DateTime.parse(a['triggered_at'])
-            : null;
-        final resolved = a['resolved_at'] != null;
-
-        Color severityColor = Colors.grey;
-        if (severity == 'critical') severityColor = Colors.red;
-        else if (severity == 'high') severityColor = Colors.orange;
-        else if (severity == 'medium') severityColor = Colors.amber;
-
-        return Card(
-          margin: const EdgeInsets.only(bottom: 8),
-          color: resolved ? theme.colorScheme.surfaceContainerHighest : null,
-          child: ListTile(
-            leading: Icon(
-              type == 'water_level_low' ? Icons.water_drop : Icons.warning,
-              color: severityColor,
+        const SizedBox(height: 8),
+        if (_filteredHistory(alertHistory).isEmpty)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Row(
+                children: [
+                  Icon(Icons.history, size: 48, color: theme.disabledColor),
+                  const SizedBox(width: 16),
+                  Text('No closed alerts yet', style: theme.textTheme.bodyLarge),
+                ],
+              ),
             ),
-            title: Text(message),
-            subtitle: triggered != null
-                ? Text(DateFormat.yMd().add_Hm().format(triggered))
-                : null,
-            trailing: resolved
-                ? Chip(label: Text('Resolved', style: TextStyle(fontSize: 12)))
-                : null,
-          ),
-        );
-      },
+          )
+        else
+          ..._filteredHistory(alertHistory).map((a) => _buildAlertCard(theme, deviceProvider, a, resolved: true)),
+      ],
+    );
+  }
+
+  List<Map<String, dynamic>> _filteredHistory(List<Map<String, dynamic>> history) {
+    if (_historySeverityFilter == null) return history;
+    return history.where((a) => (a['severity'] as String? ?? '') == _historySeverityFilter).toList();
+  }
+
+  Widget _buildAlertCard(ThemeData theme, DeviceProvider deviceProvider, Map<String, dynamic> a, {required bool resolved}) {
+    final type = a['type'] as String? ?? '';
+    final message = a['message'] as String? ?? '';
+    final severity = a['severity'] as String? ?? 'medium';
+    final triggered = a['triggered_at'] != null ? DateTime.parse(a['triggered_at']) : null;
+    final closed = a['resolved_at'] != null ? DateTime.parse(a['resolved_at']) : null;
+    final id = a['id'] as String? ?? '';
+
+    Color severityColor = Colors.grey;
+    if (severity == 'critical') severityColor = Colors.red;
+    else if (severity == 'high') severityColor = Colors.orange;
+    else if (severity == 'medium') severityColor = Colors.amber;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      color: resolved ? theme.colorScheme.surfaceContainerHighest : null,
+      child: ListTile(
+        leading: Icon(
+          type == 'water_level_low' ? Icons.water_drop : Icons.warning,
+          color: severityColor,
+        ),
+        title: Text(message),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (triggered != null) Text('Created: ${DateFormat.yMd().add_Hm().format(triggered)}'),
+            if (closed != null) Text('Closed: ${DateFormat.yMd().add_Hm().format(closed)}'),
+          ],
+        ),
+        isThreeLine: true,
+        trailing: resolved
+            ? Chip(label: Text('Closed', style: TextStyle(fontSize: 12)))
+            : FilledButton.tonal(
+                onPressed: () async {
+                  try {
+                    await deviceProvider.closeAlert(id);
+                    if (mounted) _showSnack('Alert closed');
+                  } catch (e) {
+                    if (mounted) _showSnack('Failed to close: $e');
+                  }
+                },
+                child: const Text('Close'),
+              ),
+      ),
     );
   }
 
@@ -222,28 +295,647 @@ class _AlertsScreenState extends State<AlertsScreen>
     );
   }
 
-  Widget _buildSchedulesTab() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.schedule, size: 64, color: Theme.of(context).disabledColor),
-          const SizedBox(height: 16),
-          Text('Schedules coming soon', style: Theme.of(context).textTheme.titleMedium),
-        ],
+  static const List<Map<String, String>> _scheduleTypes = [
+    {'key': 'lights', 'label': 'Lights'},
+    {'key': 'pump', 'label': 'Pump'},
+    {'key': 'ventilation', 'label': 'Ventilation'},
+  ];
+
+  static String _formatDuration(int sec) {
+    if (sec < 60) return '$sec sec';
+    if (sec < 3600) return '${sec ~/ 60} min';
+    if (sec < 86400) return '${sec ~/ 3600} hr';
+    return '${sec ~/ 86400} day';
+  }
+
+  static String _formatScheduleWhen(String? cron, int? intervalSec) {
+    if (cron != null && cron.isNotEmpty) return 'At $cron';
+    if (intervalSec != null && intervalSec > 0) return 'Every ${_formatDuration(intervalSec)}';
+    return 'Not set';
+  }
+
+  Widget _buildSchedulesTab(DeviceProvider deviceProvider) {
+    final theme = Theme.of(context);
+    final schedules = deviceProvider.schedules;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(
+          'Automate lights, pump, or ventilation. The device checks schedules every 60 seconds.',
+          style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: () => _showAddScheduleDialog(context, deviceProvider),
+          icon: const Icon(Icons.add),
+          label: const Text('Add Schedule'),
+        ),
+        const SizedBox(height: 20),
+        if (schedules.isEmpty)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  Icon(Icons.schedule, size: 48, color: theme.disabledColor),
+                  const SizedBox(height: 16),
+                  Text('No schedules', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Add a schedule to automate lights, pump, or ventilation.',
+                    style: theme.textTheme.bodyMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          ...schedules.map((s) => _buildScheduleCard(theme, deviceProvider, s)),
+      ],
+    );
+  }
+
+  Widget _buildScheduleCard(ThemeData theme, DeviceProvider deviceProvider, Map<String, dynamic> s) {
+    final type = s['schedule_type'] as String? ?? '';
+    final label = _scheduleTypes.firstWhere((m) => m['key'] == type, orElse: () => {'label': type})['label']!;
+    final cronExpr = s['cron_expr'] as String? ?? '';
+    final intervalSec = s['interval_seconds'] as int?;
+    final lastRun = s['last_run_at'] != null ? DateTime.tryParse(s['last_run_at']) : null;
+    final enabled = s['enabled'] as bool? ?? true;
+    final id = s['id'] as String? ?? '';
+    final payload = s['payload'] as Map<String, dynamic>? ?? {};
+    final state = payload['state'] ?? true;
+    final duration = payload['duration_sec'] as int? ?? 30;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  type == 'lights' ? Icons.lightbulb : type == 'pump' ? Icons.water_drop : Icons.air,
+                  color: enabled ? theme.primaryColor : theme.disabledColor,
+                  size: 28,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '$label · Turn ${state ? "ON" : "OFF"}',
+                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _formatScheduleWhen(cronExpr.isNotEmpty ? cronExpr : null, intervalSec),
+                        style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+                      ),
+                      if (type == 'pump' || type == 'ventilation')
+                        Text(
+                          'Duration: ${_formatDuration(duration)}',
+                          style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                        ),
+                      if (lastRun != null)
+                        Text(
+                          'Last run: ${DateFormat.yMd().add_Hm().format(lastRun)}',
+                          style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                        ),
+                      if (!enabled)
+                        Text('Disabled', style: theme.textTheme.bodySmall?.copyWith(color: Colors.orange)),
+                    ],
+                  ),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit),
+                      onPressed: () => _showEditScheduleDialog(context, deviceProvider, s),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () async {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Delete Schedule'),
+                            content: const Text('Remove this schedule?'),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+                            ],
+                          ),
+                        );
+                        if (confirm == true && mounted) {
+                          try {
+                            await deviceProvider.deleteSchedule(id);
+                            if (mounted) _showSnack('Schedule removed');
+                          } catch (e) {
+                            if (mounted) _showSnack('Failed: $e');
+                          }
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildThresholdsTab() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.tune, size: 64, color: Theme.of(context).disabledColor),
-          const SizedBox(height: 16),
-          Text('Threshold config coming soon', style: Theme.of(context).textTheme.titleMedium),
-        ],
+  void _showAddScheduleDialog(BuildContext context, DeviceProvider deviceProvider) {
+    if (deviceProvider.selectedDevice == null) return;
+    final device = deviceProvider.selectedDevice!;
+
+    String? selectedType = 'lights';
+    var useCron = true; // true = time-based, false = interval-based
+    final cronController = TextEditingController(text: '0 8');
+    final intervalController = TextEditingController();
+    var state = true;
+    final durationController = TextEditingController(text: '30');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Add Schedule'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  value: selectedType,
+                  decoration: const InputDecoration(labelText: 'What to automate'),
+                  items: _scheduleTypes
+                      .map((m) => DropdownMenuItem(value: m['key']!, child: Text(m['label']!)))
+                      .toList(),
+                  onChanged: (v) => setState(() => selectedType = v),
+                ),
+                const SizedBox(height: 20),
+                Text('When', style: Theme.of(ctx).textTheme.titleSmall),
+                const SizedBox(height: 8),
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(value: true, label: Text('At time'), icon: Icon(Icons.schedule)),
+                    ButtonSegment(value: false, label: Text('Every X'), icon: Icon(Icons.repeat)),
+                  ],
+                  selected: {useCron},
+                  onSelectionChanged: (v) => setState(() {
+                    useCron = v.first;
+                    if (useCron) {
+                      intervalController.clear();
+                    } else {
+                      cronController.clear();
+                    }
+                  }),
+                ),
+                const SizedBox(height: 16),
+                if (useCron) ...[
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _SchedulePresetChip(
+                        label: '8:00 AM',
+                        onTap: () => setState(() => cronController.text = '0 8'),
+                      ),
+                      _SchedulePresetChip(
+                        label: '6:00 PM',
+                        onTap: () => setState(() => cronController.text = '0 18'),
+                      ),
+                      _SchedulePresetChip(
+                        label: 'Noon',
+                        onTap: () => setState(() => cronController.text = '0 12'),
+                      ),
+                      _SchedulePresetChip(
+                        label: 'Midnight',
+                        onTap: () => setState(() => cronController.text = '0 0'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: cronController,
+                    decoration: const InputDecoration(
+                      labelText: 'Cron (minute hour)',
+                      hintText: 'e.g. 0 8 = 8 AM, 30 14 = 2:30 PM',
+                    ),
+                  ),
+                ] else ...[
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _SchedulePresetChip(
+                        label: 'Every 6 hr',
+                        onTap: () => setState(() => intervalController.text = '21600'),
+                      ),
+                      _SchedulePresetChip(
+                        label: 'Every 12 hr',
+                        onTap: () => setState(() => intervalController.text = '43200'),
+                      ),
+                      _SchedulePresetChip(
+                        label: 'Every 24 hr',
+                        onTap: () => setState(() => intervalController.text = '86400'),
+                      ),
+                      _SchedulePresetChip(
+                        label: 'Every 1 hr',
+                        onTap: () => setState(() => intervalController.text = '3600'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: intervalController,
+                    decoration: const InputDecoration(
+                      labelText: 'Interval (seconds)',
+                      hintText: 'e.g. 3600 = hourly',
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+                ],
+                const SizedBox(height: 20),
+                SwitchListTile(
+                  title: const Text('Turn ON'),
+                  subtitle: Text(state ? 'Device will turn on' : 'Device will turn off'),
+                  value: state,
+                  onChanged: (v) => setState(() => state = v),
+                ),
+                if (selectedType == 'pump' || selectedType == 'ventilation')
+                  TextField(
+                    controller: durationController,
+                    decoration: const InputDecoration(
+                      labelText: 'Duration (seconds)',
+                      hintText: 'How long to run (e.g. 30)',
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () async {
+                final cron = useCron ? cronController.text.trim() : '';
+                final interval = useCron ? null : int.tryParse(intervalController.text);
+                if (cron.isEmpty && (interval == null || interval <= 0)) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Set a time (cron) or interval')),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx);
+                final payload = <String, dynamic>{'state': state};
+                if (selectedType == 'pump' || selectedType == 'ventilation') {
+                  payload['duration_sec'] = int.tryParse(durationController.text) ?? 30;
+                }
+                if (selectedType == 'ventilation') payload['duty_percent'] = 80;
+                try {
+                  await deviceProvider.createSchedule(
+                    device.id,
+                    selectedType!,
+                    cronExpr: cron.isNotEmpty ? cron : null,
+                    intervalSeconds: interval,
+                    payload: payload,
+                  );
+                  if (context.mounted) _showSnack('Schedule added');
+                } catch (e) {
+                  if (context.mounted) _showSnack('Failed: $e');
+                }
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEditScheduleDialog(BuildContext context, DeviceProvider deviceProvider, Map<String, dynamic> s) {
+    final cronController = TextEditingController(text: s['cron_expr']?.toString() ?? '');
+    final intervalController = TextEditingController(text: (s['interval_seconds'] as int?)?.toString() ?? '');
+    final payload = s['payload'] as Map<String, dynamic>? ?? {};
+    var state = payload['state'] as bool? ?? true;
+    final durationController = TextEditingController(text: (payload['duration_sec'] as int?)?.toString() ?? '30');
+    var enabled = s['enabled'] as bool? ?? true;
+    final id = s['id'] as String? ?? '';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: Text('Edit Schedule (${s['schedule_type']})'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  controller: cronController,
+                  decoration: const InputDecoration(labelText: 'Cron (min hour)'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: intervalController,
+                  decoration: const InputDecoration(labelText: 'Interval (seconds)'),
+                  keyboardType: TextInputType.number,
+                ),
+                SwitchListTile(title: const Text('Turn ON'), value: state, onChanged: (v) => setState(() => state = v)),
+                TextField(
+                  controller: durationController,
+                  decoration: const InputDecoration(labelText: 'Duration (seconds)'),
+                  keyboardType: TextInputType.number,
+                ),
+                SwitchListTile(title: const Text('Enabled'), value: enabled, onChanged: (v) => setState(() => enabled = v)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final payload = <String, dynamic>{'state': state, 'duration_sec': int.tryParse(durationController.text) ?? 30};
+                try {
+                  await deviceProvider.updateSchedule(
+                    id,
+                    cronExpr: cronController.text.trim().isNotEmpty ? cronController.text.trim() : null,
+                    intervalSeconds: int.tryParse(intervalController.text),
+                    payload: payload,
+                    enabled: enabled,
+                  );
+                  if (context.mounted) _showSnack('Schedule updated');
+                } catch (e) {
+                  if (context.mounted) _showSnack('Failed: $e');
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static const List<Map<String, String>> _thresholdMetrics = [
+    {'key': 'temp_c', 'label': 'Temperature (°C)'},
+    {'key': 'humidity', 'label': 'Humidity (%)'},
+    {'key': 'pressure', 'label': 'Pressure (hPa)'},
+    {'key': 'gas_resistance', 'label': 'Gas / VOC (kOhm)'},
+    {'key': 'water_level_low', 'label': 'Water Level Low'},
+    {'key': 'soil_moisture', 'label': 'Soil Moisture (%)'},
+    {'key': 'light_lux', 'label': 'Light (lux)'},
+  ];
+
+  Widget _buildThresholdsTab(DeviceProvider deviceProvider) {
+    final theme = Theme.of(context);
+    final thresholds = deviceProvider.thresholds;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Text(
+          'Thresholds define min/max ranges for alerts. The device checks every 60 seconds.',
+          style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () => _showAddThresholdDialog(context, deviceProvider),
+          icon: const Icon(Icons.add),
+          label: const Text('Add Threshold'),
+        ),
+        const SizedBox(height: 16),
+        if (thresholds.isEmpty)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  Icon(Icons.tune, size: 48, color: theme.disabledColor),
+                  const SizedBox(height: 16),
+                  Text('No thresholds configured', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Add a threshold to get alerts when values go out of range.',
+                    style: theme.textTheme.bodyMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          ...thresholds.map((t) => _buildThresholdCard(theme, deviceProvider, t)),
+      ],
+    );
+  }
+
+  Widget _buildThresholdCard(ThemeData theme, DeviceProvider deviceProvider, Map<String, dynamic> t) {
+    final metric = t['metric'] as String? ?? '';
+    final label = _thresholdMetrics.firstWhere(
+      (m) => m['key'] == metric,
+      orElse: () => {'label': metric},
+    )['label']!;
+    final minVal = t['min_value'] as num?;
+    final maxVal = t['max_value'] as num?;
+    final enabled = t['enabled'] as bool? ?? true;
+    final id = t['id'] as String? ?? '';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: Icon(
+          enabled ? Icons.tune : Icons.tune_outlined,
+          color: enabled ? theme.primaryColor : theme.disabledColor,
+        ),
+        title: Text(label),
+        subtitle: Text(
+          'Min: ${minVal != null ? minVal.toStringAsFixed(1) : "—"}  |  Max: ${maxVal != null ? maxVal.toStringAsFixed(1) : "—"}  ${enabled ? "" : "(disabled)"}',
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Icons.edit),
+              onPressed: () => _showEditThresholdDialog(context, deviceProvider, t),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Delete Threshold'),
+                    content: Text('Remove threshold for $label?'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                      FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+                    ],
+                  ),
+                );
+                if (confirm == true && mounted) {
+                  try {
+                    await deviceProvider.deleteThreshold(id);
+                    if (mounted) _showSnack('Threshold removed');
+                  } catch (e) {
+                    if (mounted) _showSnack('Failed: $e');
+                  }
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAddThresholdDialog(BuildContext context, DeviceProvider deviceProvider) {
+    if (deviceProvider.selectedDevice == null) return;
+    final device = deviceProvider.selectedDevice!;
+
+    String? selectedMetric;
+    final minController = TextEditingController();
+    final maxController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Add Threshold'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  value: selectedMetric,
+                  decoration: const InputDecoration(labelText: 'Metric'),
+                  items: _thresholdMetrics
+                      .where((m) => !deviceProvider.thresholds.any((t) => t['metric'] == m['key']))
+                      .map((m) => DropdownMenuItem(value: m['key']!, child: Text(m['label']!)))
+                      .toList(),
+                  onChanged: (v) => setState(() => selectedMetric = v),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: minController,
+                  decoration: const InputDecoration(labelText: 'Min value (optional)'),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: maxController,
+                  decoration: const InputDecoration(labelText: 'Max value (optional)'),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () async {
+                if (selectedMetric == null) return;
+                final minVal = double.tryParse(minController.text);
+                final maxVal = double.tryParse(maxController.text);
+                if (minVal == null && maxVal == null) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Enter at least min or max')),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx);
+                try {
+                  await deviceProvider.createThreshold(
+                    device.id,
+                    selectedMetric!,
+                    minVal,
+                    maxVal,
+                  );
+                  if (context.mounted) _showSnack('Threshold added');
+                } catch (e) {
+                  if (context.mounted) _showSnack('Failed: $e');
+                }
+              },
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEditThresholdDialog(BuildContext context, DeviceProvider deviceProvider, Map<String, dynamic> t) {
+    final minController = TextEditingController(text: (t['min_value'] as num?)?.toString());
+    final maxController = TextEditingController(text: (t['max_value'] as num?)?.toString());
+    var enabled = t['enabled'] as bool? ?? true;
+    final id = t['id'] as String? ?? '';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          title: const Text('Edit Threshold'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('Metric: ${t['metric']}', style: Theme.of(ctx).textTheme.titleSmall),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: minController,
+                  decoration: const InputDecoration(labelText: 'Min value'),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: maxController,
+                  decoration: const InputDecoration(labelText: 'Max value'),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                ),
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('Enabled'),
+                  value: enabled,
+                  onChanged: (v) => setState(() => enabled = v),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                try {
+                  await deviceProvider.updateThreshold(
+                    id,
+                    minValue: double.tryParse(minController.text),
+                    maxValue: double.tryParse(maxController.text),
+                    enabled: enabled,
+                  );
+                  if (context.mounted) _showSnack('Threshold updated');
+                } catch (e) {
+                  if (context.mounted) _showSnack('Failed: $e');
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -252,5 +944,20 @@ class _AlertsScreenState extends State<AlertsScreen>
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
+  }
+}
+
+class _SchedulePresetChip extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+
+  const _SchedulePresetChip({required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return ActionChip(
+      label: Text(label),
+      onPressed: onTap,
+    );
   }
 }

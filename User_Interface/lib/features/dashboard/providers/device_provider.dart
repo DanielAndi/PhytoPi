@@ -27,10 +27,16 @@ class DeviceProvider extends ChangeNotifier {
   
   RealtimeChannel? _readingsSubscription;
   RealtimeChannel? _alertsSubscription;
+  RealtimeChannel? _devicesSubscription;
   List<Map<String, dynamic>> _alerts = [];
+  List<Map<String, dynamic>> _thresholds = [];
+  List<Map<String, dynamic>> _schedules = [];
+  Timer? _offlineCheckTimer;
 
   List<Device> get devices => _devices;
   List<Map<String, dynamic>> get alerts => _alerts;
+  List<Map<String, dynamic>> get thresholds => _thresholds;
+  List<Map<String, dynamic>> get schedules => _schedules;
   Device? get selectedDevice => _selectedDevice;
   List<Sensor> get sensors => _sensors;
   bool get isLoading => _isLoading;
@@ -151,6 +157,9 @@ class DeviceProvider extends ChangeNotifier {
       if (_selectedDevice == null && _devices.isNotEmpty) {
         selectDevice(_devices.first);
       }
+
+      _subscribeToDevices();
+      _startOfflineCheckTimer();
       
     } catch (e) {
       _error = e.toString();
@@ -161,10 +170,53 @@ class DeviceProvider extends ChangeNotifier {
     }
   }
 
+  void _subscribeToDevices() {
+    if (_devicesSubscription != null) {
+      SupabaseConfig.client?.removeChannel(_devicesSubscription!);
+      _devicesSubscription = null;
+    }
+    _devicesSubscription = SupabaseConfig.client!
+        .channel('device_units')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: SupabaseConfig.devicesTable,
+          callback: (payload) {
+            final record = Map<String, dynamic>.from(payload.newRecord);
+            final id = record['id'] as String?;
+            if (id == null) return;
+            final idx = _devices.indexWhere((d) => d.id == id);
+            if (idx >= 0) {
+              // Merge: Realtime UPDATE may only send changed cols; merge with existing
+              final existing = _devices[idx];
+              final merged = {
+                'id': existing.id,
+                'name': record['name'] ?? existing.name,
+                'status': record['status'],
+                'last_seen': record['last_seen'],
+                'updated_at': record['updated_at'],
+                'is_online': record['is_online'],
+              };
+              _devices[idx] = Device.fromJson(merged);
+              notifyListeners();
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  void _startOfflineCheckTimer() {
+    _offlineCheckTimer?.cancel();
+    // Rebuild UI every 15s so isOnline getter re-evaluates (devices may have gone offline)
+    _offlineCheckTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (_devices.isNotEmpty) notifyListeners();
+    });
+  }
+
   void _loadDemoDevices() {
     _devices = [
-      Device(id: 'demo-1', name: 'Living Room PhytoPi', isOnline: true, lastSeen: DateTime.now()),
-      Device(id: 'demo-2', name: 'Bedroom PhytoPi', isOnline: false, lastSeen: DateTime.now().subtract(const Duration(hours: 2))),
+      Device(id: 'demo-1', name: 'Living Room PhytoPi', lastSeen: DateTime.now()),
+      Device(id: 'demo-2', name: 'Bedroom PhytoPi', lastSeen: DateTime.now().subtract(const Duration(hours: 2))),
     ];
     
     if (_selectedDevice == null && _devices.isNotEmpty) {
@@ -182,6 +234,8 @@ class DeviceProvider extends ChangeNotifier {
     _historicalReadings.clear();
     _sensors.clear();
     _alerts.clear();
+    _thresholds.clear();
+    _schedules.clear();
     _lastUpdate = null;
     _hasReadings = false;
     
@@ -225,7 +279,9 @@ class DeviceProvider extends ChangeNotifier {
       }
       await _fetchAlerts(deviceId);
       _subscribeToAlerts(deviceId);
-      
+      await _fetchThresholds(deviceId);
+      await _fetchSchedules(deviceId);
+
     } catch (e) {
       _error = e.toString();
       debugPrint('DeviceProvider: Error loading sensors: $e');
@@ -358,6 +414,7 @@ class DeviceProvider extends ChangeNotifier {
       SupabaseConfig.client?.removeChannel(_alertsSubscription!);
       _alertsSubscription = null;
     }
+    // Keep _devicesSubscription and _offlineCheckTimer - they persist across device selection
   }
 
   Future<void> _fetchAlerts(String deviceId) async {
@@ -394,12 +451,156 @@ class DeviceProvider extends ChangeNotifier {
             }
           },
         )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: SupabaseConfig.alertsTable,
+          callback: (payload) {
+            final record = Map<String, dynamic>.from(payload.newRecord);
+            if (record['device_id'] == deviceId) {
+              final idx = _alerts.indexWhere((a) => a['id'] == record['id']);
+              if (idx >= 0) {
+                _alerts[idx] = record;
+                notifyListeners();
+              }
+            }
+          },
+        )
         .subscribe();
   }
 
   bool get hasWaterLevelLowAlert =>
       _alerts.any((a) =>
           a['type'] == 'water_level_low' && a['resolved_at'] == null);
+
+  List<Map<String, dynamic>> get activeAlerts =>
+      _alerts.where((a) => a['resolved_at'] == null).toList();
+
+  List<Map<String, dynamic>> get alertHistory =>
+      _alerts.where((a) => a['resolved_at'] != null).toList();
+
+  Future<void> _fetchThresholds(String deviceId) async {
+    try {
+      final response = await SupabaseConfig.client!
+          .from(SupabaseConfig.deviceThresholdsTable)
+          .select()
+          .eq('device_id', deviceId)
+          .order('metric');
+      _thresholds = List<Map<String, dynamic>>.from(response as List);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('DeviceProvider: Error fetching thresholds: $e');
+    }
+  }
+
+  Future<void> createThreshold(String deviceId, String metric, double? minValue, double? maxValue) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.deviceThresholdsTable)
+        .insert({
+      'device_id': deviceId,
+      'metric': metric,
+      'min_value': minValue,
+      'max_value': maxValue,
+      'enabled': true,
+    });
+    await _fetchThresholds(deviceId);
+  }
+
+  Future<void> updateThreshold(String id, {double? minValue, double? maxValue, bool? enabled}) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    final updates = <String, dynamic>{};
+    if (minValue != null) updates['min_value'] = minValue;
+    if (maxValue != null) updates['max_value'] = maxValue;
+    if (enabled != null) updates['enabled'] = enabled;
+    if (updates.isEmpty) return;
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.deviceThresholdsTable)
+        .update(updates)
+        .eq('id', id);
+    if (_selectedDevice != null) await _fetchThresholds(_selectedDevice!.id);
+  }
+
+  Future<void> _fetchSchedules(String deviceId) async {
+    try {
+      final response = await SupabaseConfig.client!
+          .from(SupabaseConfig.schedulesTable)
+          .select()
+          .eq('device_id', deviceId)
+          .order('schedule_type');
+      _schedules = List<Map<String, dynamic>>.from(response as List);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('DeviceProvider: Error fetching schedules: $e');
+    }
+  }
+
+  Future<void> createSchedule(String deviceId, String scheduleType, {String? cronExpr, int? intervalSeconds, Map<String, dynamic>? payload}) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.schedulesTable)
+        .insert({
+      'device_id': deviceId,
+      'schedule_type': scheduleType,
+      'cron_expr': cronExpr,
+      'interval_seconds': intervalSeconds,
+      'payload': payload ?? {},
+      'enabled': true,
+    });
+    await _fetchSchedules(deviceId);
+  }
+
+  Future<void> updateSchedule(String id, {String? cronExpr, int? intervalSeconds, Map<String, dynamic>? payload, bool? enabled}) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    final updates = <String, dynamic>{};
+    if (cronExpr != null) updates['cron_expr'] = cronExpr;
+    if (intervalSeconds != null) updates['interval_seconds'] = intervalSeconds;
+    if (payload != null) updates['payload'] = payload;
+    if (enabled != null) updates['enabled'] = enabled;
+    if (updates.isEmpty) return;
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.schedulesTable)
+        .update(updates)
+        .eq('id', id);
+    if (_selectedDevice != null) await _fetchSchedules(_selectedDevice!.id);
+  }
+
+  Future<void> deleteSchedule(String id) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.schedulesTable)
+        .delete()
+        .eq('id', id);
+    if (_selectedDevice != null) await _fetchSchedules(_selectedDevice!.id);
+  }
+
+  Future<void> deleteThreshold(String id) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.deviceThresholdsTable)
+        .delete()
+        .eq('id', id);
+    if (_selectedDevice != null) await _fetchThresholds(_selectedDevice!.id);
+  }
+
+  Future<void> closeAlert(String alertId) async {
+    if (!SupabaseConfig.isInitialized) return;
+    try {
+      await SupabaseConfig.client!
+          .from(SupabaseConfig.alertsTable)
+          .update({'resolved_at': DateTime.now().toUtc().toIso8601String()})
+          .eq('id', alertId);
+      // Local update for immediate UI feedback (Realtime will also fire)
+      final idx = _alerts.indexWhere((a) => a['id'] == alertId);
+      if (idx >= 0) {
+        _alerts[idx] = {..._alerts[idx], 'resolved_at': DateTime.now().toUtc().toIso8601String()};
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('DeviceProvider: Error closing alert: $e');
+      rethrow;
+    }
+  }
   
   // Demo Mode Simulation
   Timer? _demoTimer;
@@ -414,6 +615,9 @@ class DeviceProvider extends ChangeNotifier {
       'light_lux': 850.0, // Lux
       'soil_moisture': 45.0,
       'water_level': 80.0,
+      'water_level_frequency': 2.0, // 0-4: Empty, Low, Mid, High, Full
+      'pressure': 1013.0,
+      'gas_resistance': 45.0,
     };
     _hasReadings = true;
     _lastUpdate = DateTime.now();
@@ -440,6 +644,18 @@ class DeviceProvider extends ChangeNotifier {
       'water_level': List.generate(10, (i) {
         final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
         return FlSpot(ts, 75 + Random().nextDouble() * 5);
+      }),
+      'water_level_frequency': List.generate(10, (i) {
+        final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
+        return FlSpot(ts, (2 + Random().nextDouble()).clamp(0.0, 4.0));
+      }),
+      'pressure': List.generate(10, (i) {
+        final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
+        return FlSpot(ts, 1010 + Random().nextDouble() * 10);
+      }),
+      'gas_resistance': List.generate(10, (i) {
+        final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
+        return FlSpot(ts, 40 + Random().nextDouble() * 20);
       }),
     };
     notifyListeners();
@@ -476,7 +692,7 @@ class DeviceProvider extends ChangeNotifier {
       
       // Update history
       final ts = now.millisecondsSinceEpoch.toDouble();
-      for (final key in ['temp_c', 'humidity', 'light_lux', 'soil_moisture', 'water_level']) {
+      for (final key in ['temp_c', 'humidity', 'light_lux', 'soil_moisture', 'water_level', 'water_level_frequency', 'pressure', 'gas_resistance']) {
          final history = _historicalReadings[key] ?? []; // Handle potential null if key not in initial map (though it should be)
          if (history.length >= 20) history.removeAt(0);
          
@@ -486,6 +702,9 @@ class DeviceProvider extends ChangeNotifier {
          else if (key == 'light_lux') val = newLight;
          else if (key == 'soil_moisture') val = newSoil;
          else if (key == 'water_level') val = newWater;
+         else if (key == 'water_level_frequency') val = (2 + Random().nextDouble()).clamp(0.0, 4.0);
+         else if (key == 'pressure') val = 1010 + Random().nextDouble() * 10;
+         else if (key == 'gas_resistance') val = 40 + Random().nextDouble() * 20;
 
          history.add(FlSpot(ts, val));
          _historicalReadings[key] = List.from(history);
@@ -498,6 +717,12 @@ class DeviceProvider extends ChangeNotifier {
   @override
   void dispose() {
     _unsubscribe();
+    if (_devicesSubscription != null) {
+      SupabaseConfig.client?.removeChannel(_devicesSubscription!);
+      _devicesSubscription = null;
+    }
+    _offlineCheckTimer?.cancel();
+    _offlineCheckTimer = null;
     _demoTimer?.cancel();
     super.dispose();
   }
@@ -510,10 +735,9 @@ class DeviceProvider extends ChangeNotifier {
       if (!SupabaseConfig.isInitialized) {
         // Demo mode
         final newDevice = Device(
-          id: serialNumber, 
+          id: serialNumber,
           name: 'New Device ($serialNumber)',
-          isOnline: true,
-          lastSeen: DateTime.now()
+          lastSeen: DateTime.now(),
         );
         _devices.add(newDevice);
         selectDevice(newDevice);

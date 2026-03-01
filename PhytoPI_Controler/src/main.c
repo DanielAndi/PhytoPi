@@ -25,6 +25,15 @@
 #define THRESH_GAS 5          // 5 kOhm
 #define THRESH_PHOTO_WATER 5  // 5 Hz
 #define WATER_LEVEL_LOW_HZ 50   // Photoelectric: below this = low water (20Hz = empty)
+/* 5-state frequency bands (Hz): 20=empty, 50=DP1, 100=DP2, 200=DP3, 400=DP4. Hysteresis 8 Hz. */
+#define WATER_BAND_0_MAX 35     /* <35 Hz = Empty (0) */
+#define WATER_BAND_1_MIN 27     /* 35-75 = Low (1), hysteresis: exit at 27 */
+#define WATER_BAND_1_MAX 83
+#define WATER_BAND_2_MIN 67
+#define WATER_BAND_2_MAX 158
+#define WATER_BAND_3_MIN 142
+#define WATER_BAND_3_MAX 308
+#define WATER_BAND_4_MIN 292    /* >300 = Full (4), hysteresis: enter at 292 */
 #define WATER_ALERT_COOLDOWN 1800  // 30 min cooldown between water-low alerts
 #define THRESHOLD_ALERT_COOLDOWN 900  // 15 min cooldown per metric
 #define SENSOR_FAIL_ALERT_AFTER 5   // Alert after N consecutive failures
@@ -45,6 +54,24 @@ static char *light_level_sensor_id = NULL;
 static char *pressure_sensor_id = NULL;
 static char *gas_sensor_id = NULL;
 static char *water_level_photoelectric_sensor_id = NULL;
+
+/*
+ * Map photoelectric frequency (Hz) to 5-state water level (0-4) with hysteresis.
+ * 0=Empty, 1=Low, 2=Mid, 3=High, 4=Full
+ */
+static int frequency_to_water_state(int hz, int last_state)
+{
+    if (hz < 0) return last_state >= 0 ? last_state : 0;
+    if (hz < WATER_BAND_0_MAX) return 0;
+    if (hz < WATER_BAND_1_MIN) return (last_state == 0) ? 0 : 1;
+    if (hz < WATER_BAND_1_MAX) return 1;
+    if (hz < WATER_BAND_2_MIN) return (last_state == 1) ? 1 : 2;
+    if (hz < WATER_BAND_2_MAX) return 2;
+    if (hz < WATER_BAND_3_MIN) return (last_state == 2) ? 2 : 3;
+    if (hz < WATER_BAND_3_MAX) return 3;
+    if (hz < WATER_BAND_4_MIN) return (last_state == 3) ? 3 : 4;
+    return 4;
+}
 
 /*
  * Sync unsynced readings to Supabase
@@ -197,8 +224,8 @@ void sync_to_supabase(sqlite3 *db, supabase_config_t *supabase_cfg)
             if (water_level_photoelectric_sensor_id && supabase_count < max_supabase_count)
             {
                 supabase_readings[supabase_count].sensor_id = water_level_photoelectric_sensor_id;
-                supabase_readings[supabase_count].value = readings[i].value1;
-                supabase_readings[supabase_count].unit = "Hz";
+                supabase_readings[supabase_count].value = readings[i].value1; /* 0-4 state */
+                supabase_readings[supabase_count].unit = "level";
                 supabase_readings[supabase_count].timestamp = readings[i].timestamp;
                 supabase_readings[supabase_count].metadata = NULL;
                 supabase_count++;
@@ -266,11 +293,21 @@ int main()
     time_t last_water_ts = 0; // Last time water level was sent
     time_t last_light_ts = 0; // Last time light level was sent
 
-    // Initialize the database
-    sqlite3 *db = db_init("sensor_data.db");
+    // Initialize the database — use writable path to avoid "readonly database" errors.
+    // PHYTOPI_DB_PATH overrides; else /var/lib/phytopi (systemd StateDirectory).
+    const char *db_path = getenv("PHYTOPI_DB_PATH");
+    if (!db_path || db_path[0] == '\0')
+        db_path = "/var/lib/phytopi/sensor_data.db";
+    sqlite3 *db = db_init(db_path);
     if (!db)
     {
-        fprintf(stderr, "Failed to initialize database\n");
+        // Fallback to cwd when /var/lib/phytopi doesn't exist (e.g. manual run)
+        fprintf(stderr, "Failed to open %s, trying ./sensor_data.db\n", db_path);
+        db = db_init("sensor_data.db");
+    }
+    if (!db)
+    {
+        fprintf(stderr, "Failed to initialize database. Ensure PHYTOPI_DB_PATH or /var/lib/phytopi is writable.\n");
         return 1;
     }
 
@@ -415,8 +452,8 @@ int main()
             printf("  -> Ventilation auto-off (timeout)\n");
         }
 
-        printf("[%ld] L=%d T=%.1fC H=%.1f%% P=%.1f hPa G=%.1f Photo=%dHz\n",
-               now, lights_on, bme_temp, bme_hum, bme_pressure, bme_gas, photo_freq);
+        printf("[%ld] L=%d Pump=%d T=%.1fC H=%.1f%% Press=%.1f hPa G=%.1f Photo=%dHz\n",
+               now, lights_on, pump_on, bme_temp, bme_hum, bme_pressure, bme_gas, photo_freq);
 
         int timestamp = (int)now;
 
@@ -482,17 +519,21 @@ int main()
             }
         }
 
-        // 5. Photoelectric water level
+        // 5. Photoelectric water level (5-state with hysteresis)
         static int last_photo_freq = -999;
+        static int last_water_state = -1;
         static time_t last_photo_ts = 0;
         static time_t last_water_low_alert = 0;
         if (photo_freq >= 0) {
-            if (abs(photo_freq - last_photo_freq) >= THRESH_PHOTO_WATER ||
+            int water_state = frequency_to_water_state(photo_freq, last_water_state);
+            if (water_state != last_water_state ||
+                abs(photo_freq - last_photo_freq) >= THRESH_PHOTO_WATER ||
                 (now - last_photo_ts) >= HEARTBEAT_INTERVAL)
             {
-                if (sql_execute_insert(db, sql_water_photo, photo_freq, 0, timestamp) == SQLITE_OK) {
-                    printf("  -> Saved Photo Water %dHz\n", photo_freq);
+                if (sql_execute_insert(db, sql_water_photo, water_state, 0, timestamp) == SQLITE_OK) {
+                    printf("  -> Saved Photo Water state=%d (%dHz)\n", water_state, photo_freq);
                     last_photo_freq = photo_freq;
+                    last_water_state = water_state;
                     last_photo_ts = now;
                 }
             }
@@ -518,6 +559,9 @@ int main()
             {
                 sync_to_supabase(db, &supabase_cfg);
                 last_sync = now;
+                /* Heartbeat for offline detection */
+                if (supabase_cfg.device_id)
+                    supabase_heartbeat(&supabase_cfg);
             }
 
             // Poll for pending commands
@@ -783,6 +827,7 @@ int main()
                                     run_cache[run_cache_n].last_run = now;
                                     run_cache_n++;
                                 }
+                                supabase_update_schedule_last_run(&supabase_cfg, sched[s].id);
                             }
                         }
                     }
