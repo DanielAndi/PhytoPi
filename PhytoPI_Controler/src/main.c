@@ -10,6 +10,7 @@
 #include <time.h>
 #include <math.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 
 #define SYNC_INTERVAL 5       // Sync to Supabase every 5 seconds
 #define BATCH_SIZE 50         // Maximum readings per batch
@@ -294,20 +295,35 @@ int main()
     time_t last_light_ts = 0; // Last time light level was sent
 
     // Initialize the database — use writable path to avoid "readonly database" errors.
-    // PHYTOPI_DB_PATH overrides; else /var/lib/phytopi (systemd StateDirectory).
+    // PHYTOPI_DB_PATH overrides; else /var/lib/phytopi (systemd) or ~/.phytopi (manual run).
     const char *db_path = getenv("PHYTOPI_DB_PATH");
     if (!db_path || db_path[0] == '\0')
-        db_path = "/var/lib/phytopi/sensor_data.db";
+    {
+        static char db_path_buf[512];
+        const char *home = getenv("HOME");
+        if (home && home[0] != '\0')
+        {
+            // Use ~/.phytopi for manual runs (always writable)
+            char dir[512];
+            snprintf(dir, sizeof(dir), "%s/.phytopi", home);
+            mkdir(dir, 0755);
+            snprintf(db_path_buf, sizeof(db_path_buf), "%s/sensor_data.db", dir);
+            db_path = db_path_buf;
+        }
+        else
+        {
+            db_path = "/var/lib/phytopi/sensor_data.db";
+        }
+    }
     sqlite3 *db = db_init(db_path);
     if (!db)
     {
-        // Fallback to cwd when /var/lib/phytopi doesn't exist (e.g. manual run)
         fprintf(stderr, "Failed to open %s, trying ./sensor_data.db\n", db_path);
         db = db_init("sensor_data.db");
     }
     if (!db)
     {
-        fprintf(stderr, "Failed to initialize database. Ensure PHYTOPI_DB_PATH or /var/lib/phytopi is writable.\n");
+        fprintf(stderr, "Failed to initialize database. Try: export PHYTOPI_DB_PATH=$HOME/.phytopi/sensor_data.db\n");
         return 1;
     }
 
