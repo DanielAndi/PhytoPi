@@ -346,7 +346,7 @@ int main()
     {
         soil_moisture = -1;  /* No soil moisture sensor connected */
         water_level   = -1;  /* No legacy analog water sensor; use photoelectric (Photo Hz) */
-        light_level = (fd >= 0) ? read_ads7830_channel(fd, 1) : -1;
+        light_level   = -1;  /* No light sensor connected */
 
         time_t now = time(NULL);
 
@@ -415,8 +415,8 @@ int main()
             printf("  -> Ventilation auto-off (timeout)\n");
         }
 
-        printf("[%ld] L=%d Light=%d T=%.1fC H=%.1f%% P=%.1f hPa G=%.1f Photo=%dHz\n",
-               now, lights_on, light_level, bme_temp, bme_hum, bme_pressure, bme_gas, photo_freq);
+        printf("[%ld] L=%d T=%.1fC H=%.1f%% P=%.1f hPa G=%.1f Photo=%dHz\n",
+               now, lights_on, bme_temp, bme_hum, bme_pressure, bme_gas, photo_freq);
 
         int timestamp = (int)now;
 
