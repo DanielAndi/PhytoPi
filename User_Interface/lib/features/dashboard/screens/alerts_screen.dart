@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../providers/device_provider.dart';
@@ -75,20 +74,14 @@ class _AlertsScreenState extends State<AlertsScreen>
                 ],
               ),
             )
-          : GestureDetector(
-              onHorizontalDragStart: (_) {},
-              onHorizontalDragUpdate: (_) {},
-              onHorizontalDragEnd: (_) {},
-              behavior: HitTestBehavior.translucent,
-              child: IndexedStack(
-                index: _tabController.index,
-                children: [
-                  _buildAlertsTab(deviceProvider),
-                  _buildCommandsTab(deviceProvider),
-                  _buildSchedulesTab(deviceProvider),
-                  _buildThresholdsTab(deviceProvider),
-                ],
-              ),
+          : IndexedStack(
+              index: _tabController.index,
+              children: [
+                _buildAlertsTab(deviceProvider),
+                _buildCommandsTab(deviceProvider),
+                _buildSchedulesTab(deviceProvider),
+                _buildThresholdsTab(deviceProvider),
+              ],
             ),
     );
   }
@@ -100,10 +93,7 @@ class _AlertsScreenState extends State<AlertsScreen>
 
     return ListView(
       controller: _alertsScrollController,
-      primary: false,
       padding: const EdgeInsets.all(16),
-      dragStartBehavior: DragStartBehavior.down,
-      physics: const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       children: [
         // Active Alerts
         Text('Active Alerts', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
@@ -230,10 +220,7 @@ class _AlertsScreenState extends State<AlertsScreen>
 
     return SingleChildScrollView(
       controller: _commandsScrollController,
-      primary: false,
       padding: const EdgeInsets.all(24),
-      dragStartBehavior: DragStartBehavior.down,
-      physics: const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -363,10 +350,7 @@ class _AlertsScreenState extends State<AlertsScreen>
 
     return ListView(
       controller: _schedulesScrollController,
-      primary: false,
       padding: const EdgeInsets.all(16),
-      dragStartBehavior: DragStartBehavior.down,
-      physics: const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       children: [
         Text(
           'Automate lights, pump, or ventilation. The device checks schedules every 60 seconds.',
@@ -804,10 +788,7 @@ class _AlertsScreenState extends State<AlertsScreen>
 
     return ListView(
       controller: _thresholdsScrollController,
-      primary: false,
       padding: const EdgeInsets.all(16),
-      dragStartBehavior: DragStartBehavior.down,
-      physics: const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       children: [
         Text(
           'Thresholds define min/max ranges for alerts. The device checks every 60 seconds.',
