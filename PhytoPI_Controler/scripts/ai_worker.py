@@ -58,27 +58,38 @@ except ImportError:
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# Moondream vision model (optional - falls back to stubs if not installed)
+# Moondream2 via HuggingFace Transformers (local CPU/GPU inference)
+# Install: pip install "transformers>=4.51.1" "torch>=2.7.0" "accelerate>=1.10.0" "Pillow>=11.0.0"
+# CPU-only torch (smaller download): pip install torch --index-url https://download.pytorch.org/whl/cpu
 # ---------------------------------------------------------------------------
 try:
-    import moondream as md
+    import torch
+    from transformers import AutoModelForCausalLM
     from PIL import Image
     _model = None  # loaded lazily on first use
 
     def _get_model():
         global _model
         if _model is None:
-            print("Loading Moondream model (first run may take a minute)...", file=sys.stderr)
-            # moondream-2b-int8 is quantized (~900 MB) and runs well on CPU
-            _model = md.vl(model="moondream-2b-int8.mf")
-            print("Moondream model loaded.", file=sys.stderr)
+            print("Loading Moondream2 from HuggingFace (first run downloads ~2 GB, please wait)...", file=sys.stderr)
+            # Use float32 on CPU; bfloat16 only works well on CUDA/MPS
+            dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            _model = AutoModelForCausalLM.from_pretrained(
+                "vikhyatk/moondream2",
+                revision="2025-01-09",
+                trust_remote_code=True,
+                dtype=dtype,
+                device_map=device,
+            )
+            print(f"Moondream2 loaded on {device}.", file=sys.stderr)
         return _model
 
     HAS_MOONDREAM = True
 except ImportError:
     HAS_MOONDREAM = False
-    print("Warning: moondream not installed. Using placeholder results.", file=sys.stderr)
-    print("  Install: pip install moondream pillow", file=sys.stderr)
+    print("Warning: transformers/torch not installed. Using placeholder results.", file=sys.stderr)
+    print("  Install: pip install 'transformers>=4.51.1' 'torch>=2.7.0' 'accelerate>=1.10.0' Pillow", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +116,9 @@ VISION_QUESTIONS = [
 
 def _run_moondream(image) -> dict:
     model = _get_model()
+    # Encode once and reuse for all queries (much faster)
     encoded = model.encode_image(image)
+
     observations = []
     for q in VISION_QUESTIONS:
         try:
@@ -128,6 +141,8 @@ def _run_moondream(image) -> dict:
             "Based on what you see, give 3 short care tips for this plant. Return each tip on a new line starting with '-'."
         )["answer"]
         tips = [t.lstrip("- ").strip() for t in tips_raw.strip().splitlines() if t.strip()]
+        if not tips:
+            tips = ["Monitor plant regularly.", "Ensure adequate water and light."]
     except Exception:
         tips = ["Monitor plant regularly.", "Ensure adequate water and light."]
 
