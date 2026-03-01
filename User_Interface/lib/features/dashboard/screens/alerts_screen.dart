@@ -308,11 +308,28 @@ class _AlertsScreenState extends State<AlertsScreen>
     return '${sec ~/ 86400} day';
   }
 
-  static String _formatScheduleWhen(String? cron, int? intervalSec) {
-    if (cron != null && cron.isNotEmpty) return 'At $cron';
+  static String _formatScheduleWhen(BuildContext context, String? cron, int? intervalSec) {
+    if (cron != null && cron.isNotEmpty) {
+      final t = _cronToTimeOfDay(cron);
+      return 'At ${t.format(context)}';
+    }
     if (intervalSec != null && intervalSec > 0) return 'Every ${_formatDuration(intervalSec)}';
     return 'Not set';
   }
+
+  /// Parse cron "minute hour" to TimeOfDay.
+  static TimeOfDay _cronToTimeOfDay(String cron) {
+    final parts = cron.trim().split(RegExp(r'\s+'));
+    if (parts.length >= 2) {
+      final min = int.tryParse(parts[0]) ?? 0;
+      final hour = int.tryParse(parts[1]) ?? 8;
+      return TimeOfDay(hour: hour.clamp(0, 23), minute: min.clamp(0, 59));
+    }
+    return const TimeOfDay(hour: 8, minute: 0);
+  }
+
+  /// Convert TimeOfDay to cron "minute hour" for backend.
+  static String _timeOfDayToCron(TimeOfDay t) => '${t.minute} ${t.hour}';
 
   Widget _buildSchedulesTab(DeviceProvider deviceProvider) {
     final theme = Theme.of(context);
@@ -394,7 +411,7 @@ class _AlertsScreenState extends State<AlertsScreen>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        _formatScheduleWhen(cronExpr.isNotEmpty ? cronExpr : null, intervalSec),
+                        _formatScheduleWhen(context, cronExpr.isNotEmpty ? cronExpr : null, intervalSec),
                         style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
                       ),
                       if (type == 'pump' || type == 'ventilation')
@@ -459,7 +476,7 @@ class _AlertsScreenState extends State<AlertsScreen>
 
     String? selectedType = 'lights';
     var useCron = true; // true = time-based, false = interval-based
-    final cronController = TextEditingController(text: '0 8');
+    TimeOfDay selectedTime = const TimeOfDay(hour: 8, minute: 0);
     final intervalController = TextEditingController();
     var state = true;
     final durationController = TextEditingController(text: '30');
@@ -493,11 +510,7 @@ class _AlertsScreenState extends State<AlertsScreen>
                   selected: {useCron},
                   onSelectionChanged: (v) => setState(() {
                     useCron = v.first;
-                    if (useCron) {
-                      intervalController.clear();
-                    } else {
-                      cronController.clear();
-                    }
+                    if (!useCron) intervalController.clear();
                   }),
                 ),
                 const SizedBox(height: 16),
@@ -508,29 +521,34 @@ class _AlertsScreenState extends State<AlertsScreen>
                     children: [
                       _SchedulePresetChip(
                         label: '8:00 AM',
-                        onTap: () => setState(() => cronController.text = '0 8'),
+                        onTap: () => setState(() => selectedTime = const TimeOfDay(hour: 8, minute: 0)),
                       ),
                       _SchedulePresetChip(
                         label: '6:00 PM',
-                        onTap: () => setState(() => cronController.text = '0 18'),
+                        onTap: () => setState(() => selectedTime = const TimeOfDay(hour: 18, minute: 0)),
                       ),
                       _SchedulePresetChip(
                         label: 'Noon',
-                        onTap: () => setState(() => cronController.text = '0 12'),
+                        onTap: () => setState(() => selectedTime = const TimeOfDay(hour: 12, minute: 0)),
                       ),
                       _SchedulePresetChip(
                         label: 'Midnight',
-                        onTap: () => setState(() => cronController.text = '0 0'),
+                        onTap: () => setState(() => selectedTime = const TimeOfDay(hour: 0, minute: 0)),
                       ),
                     ],
                   ),
                   const SizedBox(height: 8),
-                  TextField(
-                    controller: cronController,
-                    decoration: const InputDecoration(
-                      labelText: 'Cron (minute hour)',
-                      hintText: 'e.g. 0 8 = 8 AM, 30 14 = 2:30 PM',
-                    ),
+                  ListTile(
+                    leading: const Icon(Icons.access_time),
+                    title: const Text('Time'),
+                    subtitle: Text(selectedTime.format(ctx)),
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: ctx,
+                        initialTime: selectedTime,
+                      );
+                      if (picked != null) setState(() => selectedTime = picked);
+                    },
                   ),
                 ] else ...[
                   Wrap(
@@ -590,11 +608,11 @@ class _AlertsScreenState extends State<AlertsScreen>
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             FilledButton(
               onPressed: () async {
-                final cron = useCron ? cronController.text.trim() : '';
+                final cron = useCron ? _timeOfDayToCron(selectedTime) : '';
                 final interval = useCron ? null : int.tryParse(intervalController.text);
                 if (cron.isEmpty && (interval == null || interval <= 0)) {
                   ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(content: Text('Set a time (cron) or interval')),
+                    const SnackBar(content: Text('Set a time or interval')),
                   );
                   return;
                 }
@@ -626,8 +644,11 @@ class _AlertsScreenState extends State<AlertsScreen>
   }
 
   void _showEditScheduleDialog(BuildContext context, DeviceProvider deviceProvider, Map<String, dynamic> s) {
-    final cronController = TextEditingController(text: s['cron_expr']?.toString() ?? '');
-    final intervalController = TextEditingController(text: (s['interval_seconds'] as int?)?.toString() ?? '');
+    final cronExpr = s['cron_expr']?.toString() ?? '';
+    final intervalSec = s['interval_seconds'] as int?;
+    var useCron = cronExpr.isNotEmpty;
+    TimeOfDay selectedTime = _cronToTimeOfDay(cronExpr);
+    final intervalController = TextEditingController(text: (intervalSec ?? 0) > 0 ? intervalSec.toString() : '');
     final payload = s['payload'] as Map<String, dynamic>? ?? {};
     var state = payload['state'] as bool? ?? true;
     final scheduleType = s['schedule_type'] as String? ?? 'lights';
@@ -646,20 +667,52 @@ class _AlertsScreenState extends State<AlertsScreen>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextField(
-                  controller: cronController,
-                  decoration: const InputDecoration(labelText: 'Cron (min hour)'),
-                ),
+                Text('When', style: Theme.of(ctx).textTheme.titleSmall),
                 const SizedBox(height: 8),
-                TextField(
-                  controller: intervalController,
-                  decoration: const InputDecoration(labelText: 'Interval (seconds)'),
-                  keyboardType: TextInputType.number,
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(value: true, label: Text('At time'), icon: Icon(Icons.schedule)),
+                    ButtonSegment(value: false, label: Text('Every X'), icon: Icon(Icons.repeat)),
+                  ],
+                  selected: {useCron},
+                  onSelectionChanged: (v) => setState(() {
+                    useCron = v.first;
+                    if (!useCron) intervalController.clear();
+                  }),
                 ),
+                const SizedBox(height: 16),
+                if (useCron)
+                  ListTile(
+                    leading: const Icon(Icons.access_time),
+                    title: const Text('Time'),
+                    subtitle: Text(selectedTime.format(ctx)),
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: ctx,
+                        initialTime: selectedTime,
+                      );
+                      if (picked != null) setState(() => selectedTime = picked);
+                    },
+                  )
+                else
+                  TextField(
+                    controller: intervalController,
+                    decoration: const InputDecoration(
+                      labelText: 'Interval (seconds)',
+                      hintText: 'e.g. 3600 = hourly',
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+                const SizedBox(height: 16),
                 SwitchListTile(title: const Text('Turn ON'), value: state, onChanged: (v) => setState(() => state = v)),
                 TextField(
                   controller: durationController,
-                  decoration: const InputDecoration(labelText: 'Duration (seconds)'),
+                  decoration: InputDecoration(
+                    labelText: 'Duration (seconds)',
+                    hintText: scheduleType == 'lights'
+                        ? 'How long to stay on (0 = indefinitely)'
+                        : 'How long to run (e.g. 30)',
+                  ),
                   keyboardType: TextInputType.number,
                 ),
                 SwitchListTile(title: const Text('Enabled'), value: enabled, onChanged: (v) => setState(() => enabled = v)),
@@ -670,15 +723,26 @@ class _AlertsScreenState extends State<AlertsScreen>
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             FilledButton(
               onPressed: () async {
+                final cron = useCron ? _timeOfDayToCron(selectedTime) : '';
+                final interval = useCron ? null : int.tryParse(intervalController.text);
+                if (!useCron && (interval == null || interval <= 0)) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Enter a valid interval (seconds)')),
+                  );
+                  return;
+                }
                 Navigator.pop(ctx);
-                final durationDefault = scheduleType == 'lights' ? 0 : 30;
-                final payload = <String, dynamic>{'state': state, 'duration_sec': int.tryParse(durationController.text) ?? durationDefault};
+                final durationDefaultVal = scheduleType == 'lights' ? 0 : 30;
+                final payloadData = <String, dynamic>{
+                  'state': state,
+                  'duration_sec': int.tryParse(durationController.text) ?? durationDefaultVal,
+                };
                 try {
                   await deviceProvider.updateSchedule(
                     id,
-                    cronExpr: cronController.text.trim().isNotEmpty ? cronController.text.trim() : null,
-                    intervalSeconds: int.tryParse(intervalController.text),
-                    payload: payload,
+                    cronExpr: useCron ? cron : '',
+                    intervalSeconds: useCron ? 0 : interval!,
+                    payload: payloadData,
                     enabled: enabled,
                   );
                   if (context.mounted) _showSnack('Schedule updated');
