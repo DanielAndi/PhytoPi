@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/device_provider.dart';
-import '../models/device_model.dart';
 
 class DevicesScreen extends StatefulWidget {
   const DevicesScreen({super.key});
@@ -84,40 +83,45 @@ class _DevicesScreenState extends State<DevicesScreen> {
             icon: const Icon(Icons.add),
             label: const Text('Claim Device'),
           ),
-          body: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'My Devices',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text('Select a device to view on the dashboard'),
-                const SizedBox(height: 24),
-                
-                if (deviceProvider.devices.isEmpty)
-                  Expanded(
-                    child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.devices_other, size: 64, color: Colors.grey),
-                          const SizedBox(height: 16),
-                          const Text('No devices found'),
-                          const SizedBox(height: 8),
-                          const Text('Claim a new device to get started'),
-                        ],
+          body: RefreshIndicator(
+            onRefresh: () => deviceProvider.refreshDevices(),
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'My Devices',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  )
-                else
-                  Expanded(
-                    child: GridView.builder(
+                    const SizedBox(height: 8),
+                    const Text('Select a device to view on the dashboard'),
+                    const SizedBox(height: 24),
+                    if (deviceProvider.devices.isEmpty)
+                      SizedBox(
+                        height: MediaQuery.of(context).size.height - 200,
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.devices_other, size: 64, color: Colors.grey),
+                              const SizedBox(height: 16),
+                              const Text('No devices found'),
+                              const SizedBox(height: 8),
+                              const Text('Claim a new device to get started'),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
                       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                         maxCrossAxisExtent: 400,
                         childAspectRatio: 1.5,
@@ -200,8 +204,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
                         );
                       },
                     ),
-                  ),
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
         );

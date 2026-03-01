@@ -32,6 +32,7 @@ class DeviceProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _thresholds = [];
   List<Map<String, dynamic>> _schedules = [];
   Timer? _offlineCheckTimer;
+  Timer? _deviceRefreshTimer;
 
   List<Device> get devices => _devices;
   List<Map<String, dynamic>> get alerts => _alerts;
@@ -135,19 +136,21 @@ class DeviceProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _loadDevices() async {
+  Future<void> _loadDevices({bool silent = false}) async {
     if (!SupabaseConfig.isInitialized) {
       _loadDemoDevices();
       return;
     }
 
-    _isLoading = true;
-    notifyListeners();
+    if (!silent) {
+      _isLoading = true;
+      notifyListeners();
+    }
 
     try {
       final response = await SupabaseConfig.client!
           .from(SupabaseConfig.devicesTable)
-          .select()
+          .select('id, name, last_seen, status, updated_at, created_at, registered_at')
           .order('created_at');
       
       final data = response as List<dynamic>;
@@ -160,12 +163,13 @@ class DeviceProvider extends ChangeNotifier {
 
       _subscribeToDevices();
       _startOfflineCheckTimer();
+      _startDeviceRefreshTimer();
       
     } catch (e) {
-      _error = e.toString();
+      if (!silent) _error = e.toString();
       debugPrint('DeviceProvider: Error loading devices: $e');
     } finally {
-      _isLoading = false;
+      if (!silent) _isLoading = false;
       notifyListeners();
     }
   }
@@ -187,13 +191,13 @@ class DeviceProvider extends ChangeNotifier {
             if (id == null) return;
             final idx = _devices.indexWhere((d) => d.id == id);
             if (idx >= 0) {
-              // Merge: Realtime UPDATE may only send changed cols; merge with existing
+              // Merge: Realtime UPDATE may only send changed cols; preserve existing when missing
               final existing = _devices[idx];
               final merged = {
                 'id': existing.id,
                 'name': record['name'] ?? existing.name,
                 'status': record['status'],
-                'last_seen': record['last_seen'],
+                'last_seen': record['last_seen'] ?? existing.lastSeen?.toUtc().toIso8601String(),
                 'updated_at': record['updated_at'],
                 'is_online': record['is_online'],
               };
@@ -210,6 +214,16 @@ class DeviceProvider extends ChangeNotifier {
     // Rebuild UI every 15s so isOnline getter re-evaluates (devices may have gone offline)
     _offlineCheckTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (_devices.isNotEmpty) notifyListeners();
+    });
+  }
+
+  void _startDeviceRefreshTimer() {
+    _deviceRefreshTimer?.cancel();
+    // Refresh devices every 45s to pick up last_seen (fallback if Realtime misses updates)
+    _deviceRefreshTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      if (SupabaseConfig.isInitialized && _devices.isNotEmpty) {
+        _loadDevices(silent: true);
+      }
     });
   }
 
@@ -723,6 +737,8 @@ class DeviceProvider extends ChangeNotifier {
     }
     _offlineCheckTimer?.cancel();
     _offlineCheckTimer = null;
+    _deviceRefreshTimer?.cancel();
+    _deviceRefreshTimer = null;
     _demoTimer?.cancel();
     super.dispose();
   }
