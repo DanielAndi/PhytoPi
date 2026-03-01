@@ -77,7 +77,7 @@ try:
             device = "cuda" if torch.cuda.is_available() else "cpu"
             _model = AutoModelForCausalLM.from_pretrained(
                 "vikhyatk/moondream2",
-                revision="2025-01-09",
+                revision="2024-08-26",
                 trust_remote_code=True,
                 dtype=dtype,
                 device_map=device,
