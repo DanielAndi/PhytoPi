@@ -75,14 +75,20 @@ class _AlertsScreenState extends State<AlertsScreen>
                 ],
               ),
             )
-          : IndexedStack(
-              index: _tabController.index,
-              children: [
-                _buildAlertsTab(deviceProvider),
-                _buildCommandsTab(deviceProvider),
-                _buildSchedulesTab(deviceProvider),
-                _buildThresholdsTab(deviceProvider),
-              ],
+          : GestureDetector(
+              onHorizontalDragStart: (_) {},
+              onHorizontalDragUpdate: (_) {},
+              onHorizontalDragEnd: (_) {},
+              behavior: HitTestBehavior.translucent,
+              child: IndexedStack(
+                index: _tabController.index,
+                children: [
+                  _buildAlertsTab(deviceProvider),
+                  _buildCommandsTab(deviceProvider),
+                  _buildSchedulesTab(deviceProvider),
+                  _buildThresholdsTab(deviceProvider),
+                ],
+              ),
             ),
     );
   }
