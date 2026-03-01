@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import subprocess
+import glob
 from pathlib import Path
 
 try:
@@ -17,6 +18,46 @@ try:
 except ImportError:
     print("Install: pip install supabase", file=sys.stderr)
     sys.exit(1)
+
+
+def find_usb_camera():
+    """Auto-detect first USB camera from /dev/video* (prefer video0)."""
+    devices = sorted(glob.glob("/dev/video*"))
+    if not devices:
+        return "/dev/video0"
+    for d in devices:
+        if "video0" in d:
+            return d
+    return devices[0]
+
+
+def capture_with_pi_camera(out_path: Path) -> bool:
+    """Try rpicam-still (Bookworm) or libcamera-still (Bullseye). Returns True if capture succeeded."""
+    for cmd_name in ("rpicam-still", "libcamera-still"):
+        if subprocess.run(["which", cmd_name], capture_output=True).returncode != 0:
+            continue
+        cmd = [cmd_name, "-o", str(out_path), "-t", "1000", "-n"]
+        r = subprocess.run(cmd, capture_output=True)
+        if r.returncode == 0 and out_path.exists():
+            return True
+    return False
+
+
+def capture_with_usb_camera(out_path: Path) -> bool:
+    """Capture a single frame from USB camera via ffmpeg (video4linux2)."""
+    if subprocess.run(["which", "ffmpeg"], capture_output=True).returncode != 0:
+        return False
+    dev = find_usb_camera()
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "video4linux2", "-i", dev,
+        "-frames:v", "1",
+        "-vcodec", "mjpeg",
+        str(out_path),
+    ]
+    r = subprocess.run(cmd, capture_output=True, timeout=15)
+    return r.returncode == 0 and out_path.exists()
+
 
 def main():
     device_id = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SUPABASE_DEVICE_ID")
@@ -31,20 +72,13 @@ def main():
     ts = int(time.time())
     out_path = Path(f"/tmp/phytopi_capture_{ts}.jpg")
 
-    # Prefer rpicam-still (Bookworm), fall back to libcamera-still (Bullseye)
-    capture_cmd = None
-    if subprocess.run(["which", "rpicam-still"], capture_output=True).returncode == 0:
-        capture_cmd = ["rpicam-still", "-o", str(out_path), "-t", "1000", "-n"]
-    elif subprocess.run(["which", "libcamera-still"], capture_output=True).returncode == 0:
-        capture_cmd = ["libcamera-still", "-o", str(out_path), "-t", "1000", "-n"]
-    if not capture_cmd:
-        print("Capture failed: neither rpicam-still nor libcamera-still found", file=sys.stderr)
-        sys.exit(2)
-
-    try:
-        subprocess.run(capture_cmd, check=True, capture_output=True)
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        print(f"Capture failed: {e}", file=sys.stderr)
+    # Try Pi camera (rpicam-still / libcamera-still) first, then USB camera via ffmpeg
+    if capture_with_pi_camera(out_path):
+        pass  # success
+    elif capture_with_usb_camera(out_path):
+        pass  # success
+    else:
+        print("Capture failed: Pi camera and USB camera (ffmpeg) both failed or unavailable", file=sys.stderr)
         sys.exit(2)
 
     if not out_path.exists():
