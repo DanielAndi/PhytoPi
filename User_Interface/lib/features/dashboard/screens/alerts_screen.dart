@@ -27,6 +27,9 @@ class _AlertsScreenState extends State<AlertsScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -72,9 +75,8 @@ class _AlertsScreenState extends State<AlertsScreen>
                 ],
               ),
             )
-          : TabBarView(
-              controller: _tabController,
-              physics: const NeverScrollableScrollPhysics(),
+          : IndexedStack(
+              index: _tabController.index,
               children: [
                 _buildAlertsTab(deviceProvider),
                 _buildCommandsTab(deviceProvider),
