@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/config/app_config.dart';
 import '../../../core/config/supabase_config.dart';
 import '../providers/device_provider.dart';
+import '../widgets/mjpeg_view.dart';
+
+enum _StreamState { loading, live, disconnected }
 
 class AiHealthScreen extends StatefulWidget {
   const AiHealthScreen({super.key});
@@ -16,11 +19,32 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
   Map<String, dynamic>? _latestInference;
   bool _loading = true;
   String? _error;
+  _StreamState _streamState = _StreamState.loading;
+  String _streamUrl = '';
 
   @override
   void initState() {
     super.initState();
     _load();
+    _streamUrl = _cacheBustUrl(AppConfig.streamUrl);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _streamState = _StreamState.live);
+    });
+  }
+
+  String _cacheBustUrl(String base) {
+    final sep = base.contains('?') ? '&' : '?';
+    return '$base${sep}_t=${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  void _retryStream() {
+    setState(() {
+      _streamState = _StreamState.loading;
+      _streamUrl = _cacheBustUrl(AppConfig.streamUrl);
+    });
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _streamState = _StreamState.live);
+    });
   }
 
   Future<void> _load() async {
@@ -160,6 +184,58 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
               ],
             ),
             const SizedBox(height: 24),
+            // Livestream section
+            Text('Live View', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Container(
+              height: 280,
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (_streamState == _StreamState.loading)
+                    const Center(child: CircularProgressIndicator(color: Colors.white))
+                  else
+                    MjpegView(url: _streamUrl, fit: BoxFit.contain),
+                  if (_streamState == _StreamState.disconnected)
+                    Container(
+                      color: Colors.black54,
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.videocam_off, size: 48, color: Colors.white70),
+                            const SizedBox(height: 8),
+                            Text('Stream disconnected', style: TextStyle(color: Colors.white70)),
+                            const SizedBox(height: 16),
+                            FilledButton.icon(
+                              onPressed: _retryStream,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Retry'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    bottom: 8,
+                    right: 8,
+                    child: TextButton.icon(
+                      onPressed: _retryStream,
+                      icon: const Icon(Icons.refresh, size: 18, color: Colors.white70),
+                      label: Text('Retry', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text('AI Capture', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 8),
             if (imageUrl != null && status == 'completed') ...[
               FutureBuilder<String>(
                 future: _getImageUrl(imageUrl),

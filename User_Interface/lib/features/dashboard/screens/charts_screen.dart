@@ -48,7 +48,9 @@ class _ChartsScreenState extends State<ChartsScreen> {
         final humidityPoints = _filterDataByTimeFrame(historicalReadings['humidity'] ?? []);
         final lightPoints = _filterDataByTimeFrame(historicalReadings['light_lux'] ?? []);
         final soilPoints = _filterDataByTimeFrame(historicalReadings['soil_moisture'] ?? []);
-        final waterPoints = _filterDataByTimeFrame(historicalReadings['water_level'] ?? []);
+        final waterPoints = _filterDataByTimeFrame(historicalReadings['water_level_frequency'] ?? historicalReadings['water_level'] ?? []);
+        final pressurePoints = _filterDataByTimeFrame(historicalReadings['pressure'] ?? []);
+        final gasPoints = _filterDataByTimeFrame(historicalReadings['gas_resistance'] ?? []);
 
         return Scaffold(
           backgroundColor: Colors.transparent,
@@ -183,16 +185,44 @@ class _ChartsScreenState extends State<ChartsScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Water Level Chart
+                  // Water Level Chart (5-state or legacy %)
                   _buildChartContainer(
                     context,
                     DashboardChart(
                       title: 'Water Level',
                       dataPoints: waterPoints,
                       minY: 0,
-                      maxY: 100,
-                      unit: '%',
+                      maxY: (historicalReadings['water_level_frequency']?.isNotEmpty ?? false) ? 4 : 100,
+                      unit: (historicalReadings['water_level_frequency']?.isNotEmpty ?? false) ? 'level' : '%',
                       color: Colors.cyan,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Pressure Chart
+                  _buildChartContainer(
+                    context,
+                    DashboardChart(
+                      title: 'Pressure',
+                      dataPoints: pressurePoints,
+                      minY: 900,
+                      maxY: 1100,
+                      unit: 'hPa',
+                      color: Colors.purple,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Gas / VOC Chart
+                  _buildChartContainer(
+                    context,
+                    DashboardChart(
+                      title: 'Gas / VOC',
+                      dataPoints: gasPoints,
+                      minY: 0,
+                      maxY: 500,
+                      unit: 'kOhm',
+                      color: Colors.teal,
                     ),
                   ),
                 ],

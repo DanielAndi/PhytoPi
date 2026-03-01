@@ -1,0 +1,14 @@
+[Unit]
+Description=PhytoPi MJPEG Camera Stream
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/phytopi
+ExecStart=/usr/bin/python3 /opt/phytopi/scripts/stream_camera_web.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -85,7 +85,7 @@ flowchart TB
 
 - `id`, `device_id`, `schedule_type` (lights, pump, ventilation), `cron_expr` or `interval_seconds`, `payload` (jsonb: duration, state, etc.), `enabled`, `created_at`, `updated_at`
 
-`**ai_capture_jobs**` – Image capture + AI pipeline state
+`**ai_capture_jobs`** – Image capture + AI pipeline state
 
 - `id`, `device_id`, `image_url` (Supabase Storage), `status` (pending, processing, completed, failed), `vision_result` (jsonb), `llm_result` (jsonb), `created_at`, `processed_at`
 

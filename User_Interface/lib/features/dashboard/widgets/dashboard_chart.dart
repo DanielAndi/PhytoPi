@@ -9,7 +9,6 @@ class DashboardChart extends StatelessWidget {
   final double minY;
   final double maxY;
   final String unit;
-
   const DashboardChart({
     super.key,
     required this.title,
@@ -20,20 +19,31 @@ class DashboardChart extends StatelessWidget {
     this.unit = '',
   });
 
+  /// Downsample to maxPoints for performance with large datasets
+  static List<FlSpot> _downsample(List<FlSpot> points, int maxPoints) {
+    if (points.length <= maxPoints) return points;
+    final step = points.length / maxPoints;
+    final result = <FlSpot>[];
+    for (var i = 0.0; i < points.length; i += step) {
+      result.add(points[i.round().clamp(0, points.length - 1)]);
+    }
+    return result;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final chartColor = color ?? theme.primaryColor;
+    final points = _downsample(dataPoints, 500);
 
     double minX = 0;
     double maxX = 10;
-    if (dataPoints.isNotEmpty) {
-      minX = dataPoints.first.x;
-      maxX = dataPoints.last.x;
-      // Ensure we have a range
+    if (points.isNotEmpty) {
+      minX = points.first.x;
+      maxX = points.last.x;
       if (minX == maxX) {
-        minX -= 1000 * 60; // -1 min
-        maxX += 1000 * 60; // +1 min
+        minX -= 1000 * 60;
+        maxX += 1000 * 60;
       }
     }
 
@@ -140,7 +150,7 @@ class DashboardChart extends StatelessWidget {
                 clipData: const FlClipData.all(),
                 lineBarsData: [
                   LineChartBarData(
-                    spots: dataPoints,
+                    spots: points,
                     isCurved: false,
                     color: chartColor,
                     barWidth: 3,

@@ -59,5 +59,11 @@ typedef struct {
 /* Fetch enabled schedules. Returns count, -1 on error. Caller frees *out. */
 int supabase_fetch_schedules(supabase_config_t *config, device_schedule_t **out, int *count);
 
+/* Heartbeat: update device_units.last_seen for offline detection. Returns 0 on success. */
+int supabase_heartbeat(supabase_config_t *config);
+
+/* Update schedule last_run_at. Returns 0 on success. */
+int supabase_update_schedule_last_run(supabase_config_t *config, const char *schedule_id);
+
 #endif
 

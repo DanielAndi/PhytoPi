@@ -409,3 +409,106 @@ int supabase_fetch_schedules(supabase_config_t *config, device_schedule_t **out,
     return n;
 }
 
+/*
+ * Heartbeat: PATCH device_units SET last_seen = now() WHERE id = device_id
+ * Returns 0 on success, -1 on failure
+ */
+int supabase_heartbeat(supabase_config_t *config)
+{
+    if (!config || !config->api_url || !config->api_key || !config->device_id)
+        return -1;
+    if (!curl_handle)
+        return -1;
+
+    time_t now_t = time(NULL);
+    struct tm *tm_info = gmtime(&now_t);
+    char timestamp_str[64];
+    strftime(timestamp_str, sizeof(timestamp_str), "%Y-%m-%dT%H:%M:%SZ", tm_info);
+
+    json_object *body = json_object_new_object();
+    json_object_object_add(body, "last_seen", json_object_new_string(timestamp_str));
+    const char *json_string = json_object_to_json_string(body);
+
+    char url[512];
+    snprintf(url, sizeof(url), "%s/rest/v1/device_units?id=eq.%s",
+             config->api_url, config->device_id);
+
+    struct curl_slist *headers = NULL;
+    char apikey_header[256];
+    char auth_header[256];
+    snprintf(apikey_header, sizeof(apikey_header), "apikey: %s", config->api_key);
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", config->api_key);
+    headers = curl_slist_append(headers, apikey_header);
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    headers = curl_slist_append(headers, "Prefer: return=minimal");
+
+    curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+    curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, json_string);
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl_handle, CURLOPT_CUSTOMREQUEST, "PATCH");
+
+    CURLcode res = curl_easy_perform(curl_handle);
+    long response_code = 0;
+    curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &response_code);
+    curl_slist_free_all(headers);
+    json_object_put(body);
+
+    curl_easy_setopt(curl_handle, CURLOPT_CUSTOMREQUEST, NULL);
+
+    if (res != CURLE_OK || response_code < 200 || response_code >= 300)
+        return -1;
+    return 0;
+}
+
+/*
+ * Update schedule last_run_at. Returns 0 on success.
+ */
+int supabase_update_schedule_last_run(supabase_config_t *config, const char *schedule_id)
+{
+    if (!config || !config->api_url || !config->api_key || !schedule_id)
+        return -1;
+    if (!curl_handle)
+        return -1;
+
+    time_t now_t = time(NULL);
+    struct tm *tm_info = gmtime(&now_t);
+    char timestamp_str[64];
+    strftime(timestamp_str, sizeof(timestamp_str), "%Y-%m-%dT%H:%M:%SZ", tm_info);
+
+    json_object *body = json_object_new_object();
+    json_object_object_add(body, "last_run_at", json_object_new_string(timestamp_str));
+    const char *json_string = json_object_to_json_string(body);
+
+    char url[512];
+    snprintf(url, sizeof(url), "%s/rest/v1/schedules?id=eq.%s",
+             config->api_url, schedule_id);
+
+    struct curl_slist *headers = NULL;
+    char apikey_header[256];
+    char auth_header[256];
+    snprintf(apikey_header, sizeof(apikey_header), "apikey: %s", config->api_key);
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", config->api_key);
+    headers = curl_slist_append(headers, apikey_header);
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    headers = curl_slist_append(headers, "Prefer: return=minimal");
+
+    curl_easy_setopt(curl_handle, CURLOPT_URL, url);
+    curl_easy_setopt(curl_handle, CURLOPT_POSTFIELDS, json_string);
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl_handle, CURLOPT_CUSTOMREQUEST, "PATCH");
+
+    CURLcode res = curl_easy_perform(curl_handle);
+    long response_code = 0;
+    curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &response_code);
+    curl_slist_free_all(headers);
+    json_object_put(body);
+
+    curl_easy_setopt(curl_handle, CURLOPT_CUSTOMREQUEST, NULL);
+
+    if (res != CURLE_OK || response_code < 200 || response_code >= 300)
+        return -1;
+    return 0;
+}
+

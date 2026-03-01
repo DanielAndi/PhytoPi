@@ -19,6 +19,7 @@ import '../../support/screens/help_support_screen.dart';
 import '../../settings/screens/settings_screen.dart';
 import '../widgets/dashboard_gauge.dart';
 import '../widgets/dashboard_chart.dart';
+import '../widgets/water_level_gauge.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -453,7 +454,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final humidityPoints = historicalReadings['humidity'] ?? [];
         final lightPoints = historicalReadings['light_lux'] ?? [];
         final soilPoints = historicalReadings['soil_moisture'] ?? [];
-        final waterPoints = historicalReadings['water_level'] ?? [];
+        final waterPoints = historicalReadings['water_level_frequency'] ?? historicalReadings['water_level'] ?? [];
 
         return SingleChildScrollView(
           controller: _webScrollController, // Shared controller for simplicity
@@ -600,18 +601,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           width: (width - (16 * (count - 1))) / count,
                           height: 250,
                           child: DashboardGauge(
-                            title: 'Light Level',
-                            value: latestReadings['light_lux'] ?? 0,
-                            min: 0,
-                            max: 2000, // Adjusted for Lux
-                            unit: 'lux',
-                            color: Colors.amber,
-                          ),
-                        ),
-                        SizedBox(
-                          width: (width - (16 * (count - 1))) / count,
-                          height: 250,
-                          child: DashboardGauge(
                             title: 'Soil Moisture',
                             value: latestReadings['soil_moisture'] ?? 0,
                             min: 0,
@@ -623,13 +612,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         SizedBox(
                           width: (width - (16 * (count - 1))) / count,
                           height: 250,
-                          child: DashboardGauge(
+                          child: WaterLevelGauge(
                             title: 'Water Level',
-                            value: latestReadings['water_level'] ?? 0,
-                            min: 0,
-                            max: 100,
-                            unit: '%',
-                            color: Colors.cyan,
+                            value: latestReadings['water_level_frequency'] ?? latestReadings['water_level'] ?? 0,
                           ),
                         ),
                         SizedBox(
@@ -737,8 +722,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   title: 'Water Level Trend',
                                   dataPoints: waterPoints,
                                   minY: 0,
-                                  maxY: 100,
-                                  unit: '%',
+                                  maxY: (historicalReadings['water_level_frequency']?.isNotEmpty ?? false) ? 4 : 100,
+                                  unit: (historicalReadings['water_level_frequency']?.isNotEmpty ?? false) ? 'level' : '%',
                                   color: Colors.cyan,
                                 ),
                               ),
