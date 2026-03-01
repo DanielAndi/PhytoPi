@@ -1,66 +1,190 @@
 #!/usr/bin/env python3
 """
-PhytoPi AI Worker - runs on home PC
-Polls ai_capture_jobs for pending, runs vision + LLM, writes results.
-Requires: Moondream, Qwen2.5 (or similar), supabase, transformers.
-Usage: ai_worker.py
-Env: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (or anon for testing)
+PhytoPi AI Worker - runs on home PC / server
+Polls ai_capture_jobs for pending jobs, runs Moondream vision inference,
+writes diagnostic + tips back to ai_capture_jobs and ml_inferences.
+
+Usage:
+    python3 scripts/ai_worker.py
+
+Environment (set in .env file next to this script, or export before running):
+    SUPABASE_URL               - your Supabase project URL
+    SUPABASE_SERVICE_ROLE_KEY  - service role key (bypasses RLS)
+    SUPABASE_ANON_KEY          - fallback if service role not set
+
+Models (installed via pip):
+    pip install moondream pillow requests supabase
 """
 import os
 import sys
 import time
-import json
+import io
+import requests
+from pathlib import Path
 from datetime import datetime, timezone
 
+# ---------------------------------------------------------------------------
+# Load .env from the same directory as this script (or the working directory)
+# ---------------------------------------------------------------------------
+def _load_dotenv():
+    candidates = [
+        Path(__file__).parent.parent / ".env",   # PhytoPI_Controler/.env
+        Path(__file__).parent / ".env",            # scripts/.env
+        Path(".env"),                              # cwd/.env
+    ]
+    for path in candidates:
+        if path.exists():
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, val = line.partition("=")
+                    val = val.strip().strip('"').strip("'")
+                    os.environ.setdefault(key.strip(), val)
+            print(f"Loaded env from {path}", file=sys.stderr)
+            return
+    print("Warning: no .env file found; relying on exported environment variables.", file=sys.stderr)
+
+_load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Supabase client
+# ---------------------------------------------------------------------------
 try:
     from supabase import create_client
 except ImportError:
     print("pip install supabase", file=sys.stderr)
     sys.exit(1)
 
-# Optional: vision + LLM - install if available
+# ---------------------------------------------------------------------------
+# Moondream vision model (optional - falls back to stubs if not installed)
+# ---------------------------------------------------------------------------
 try:
-    import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    HAS_VISION = True
+    import moondream as md
+    from PIL import Image
+    _model = None  # loaded lazily on first use
+
+    def _get_model():
+        global _model
+        if _model is None:
+            print("Loading Moondream model (first run may take a minute)...", file=sys.stderr)
+            # moondream-2b-int8 is quantized (~900 MB) and runs well on CPU
+            _model = md.vl(model="moondream-2b-int8.mf")
+            print("Moondream model loaded.", file=sys.stderr)
+        return _model
+
+    HAS_MOONDREAM = True
 except ImportError:
-    HAS_VISION = False
-    print("Warning: transformers/torch not installed. Will use placeholder results.", file=sys.stderr)
+    HAS_MOONDREAM = False
+    print("Warning: moondream not installed. Using placeholder results.", file=sys.stderr)
+    print("  Install: pip install moondream pillow", file=sys.stderr)
 
 
-def process_image_stub(path_or_url: str) -> dict:
-    """Placeholder when models not installed. Replace with Moondream inference."""
+# ---------------------------------------------------------------------------
+# Image fetching
+# ---------------------------------------------------------------------------
+def _fetch_image(supabase, storage_path: str):
+    """Download image from Supabase Storage into a PIL Image object."""
+    try:
+        response = supabase.storage.from_("device-images").download(storage_path)
+        return Image.open(io.BytesIO(response))
+    except Exception as e:
+        print(f"Could not fetch image from storage ({storage_path}): {e}", file=sys.stderr)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Real inference with Moondream
+# ---------------------------------------------------------------------------
+VISION_QUESTIONS = [
+    "Describe the overall health and appearance of the plant in this image.",
+    "Are there any visible signs of disease, pests, discoloration, or wilting?",
+    "What is the current growth stage of the plant?",
+]
+
+def _run_moondream(image) -> dict:
+    model = _get_model()
+    encoded = model.encode_image(image)
+    observations = []
+    for q in VISION_QUESTIONS:
+        try:
+            answer = model.query(encoded, q)["answer"]
+            observations.append(answer.strip())
+        except Exception as e:
+            observations.append(f"(query failed: {e})")
+
+    # Derive a simple plant_state from the observations text
+    combined = " ".join(observations).lower()
+    if any(w in combined for w in ("disease", "pest", "wilt", "yellow", "brown", "rot", "damage", "dead")):
+        plant_state = "needs_attention"
+    else:
+        plant_state = "healthy"
+
+    # Ask for tips directly
+    try:
+        tips_raw = model.query(
+            encoded,
+            "Based on what you see, give 3 short care tips for this plant. Return each tip on a new line starting with '-'."
+        )["answer"]
+        tips = [t.lstrip("- ").strip() for t in tips_raw.strip().splitlines() if t.strip()]
+    except Exception:
+        tips = ["Monitor plant regularly.", "Ensure adequate water and light."]
+
+    # Ask for a one-paragraph diagnostic summary
+    try:
+        diagnostic = model.query(
+            encoded,
+            "Write a 2-3 sentence plant health diagnostic based on what you observe in the image."
+        )["answer"].strip()
+    except Exception:
+        diagnostic = observations[0] if observations else "Plant observed."
+
     return {
-        "observations": ["Plant visible", "Leaves present"],
-        "plant_state": "healthy",
+        "observations": observations,
+        "plant_state": plant_state,
+        "diagnostic": diagnostic,
+        "tips": tips,
     }
 
 
-def run_llm_stub(vision_result: dict) -> dict:
-    """Placeholder when LLM not installed. Replace with Qwen2.5 inference."""
+# ---------------------------------------------------------------------------
+# Stub fallbacks
+# ---------------------------------------------------------------------------
+def _stub_result(_image) -> dict:
     return {
-        "diagnostic": "Plant appears healthy based on image analysis.",
+        "observations": ["Plant visible", "Leaves present"],
+        "plant_state": "healthy",
+        "diagnostic": "Plant appears healthy based on image analysis. (stub - install moondream for real results)",
         "tips": [
             "Continue current watering schedule.",
             "Ensure adequate light exposure.",
+            "Monitor for pests weekly.",
         ],
     }
 
 
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
 def main():
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_ANON_KEY")
     if not url or not key:
-        print("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY", file=sys.stderr)
+        print("Error: Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env or environment.", file=sys.stderr)
         sys.exit(1)
 
-    supabase = create_client(url, key)
+    model_version = "moondream-2b-int8" if HAS_MOONDREAM else "stub"
+    print(f"AI Worker starting. Model: {model_version}")
+    print(f"Polling for pending jobs every 10s ...")
 
+    supabase = create_client(url, key)
     current_job_id = None
+
     while True:
         try:
             rows = supabase.table("ai_capture_jobs").select("*").eq("status", "pending").limit(1).execute()
-            if not rows.data or len(rows.data) == 0:
+            if not rows.data:
                 time.sleep(10)
                 continue
 
@@ -68,12 +192,26 @@ def main():
             job_id = job["id"]
             current_job_id = job_id
             device_id = job["device_id"]
-            image_url = job.get("image_url")
+            image_storage_path = job.get("image_url")
 
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Processing job {job_id} (image: {image_storage_path})")
             supabase.table("ai_capture_jobs").update({"status": "processing"}).eq("id", job_id).execute()
 
-            vision_result = process_image_stub(image_url or "")
-            llm_result = run_llm_stub(vision_result)
+            image = _fetch_image(supabase, image_storage_path) if image_storage_path else None
+
+            if HAS_MOONDREAM and image:
+                result = _run_moondream(image)
+            else:
+                result = _stub_result(image)
+
+            vision_result = {
+                "observations": result["observations"],
+                "plant_state": result["plant_state"],
+            }
+            llm_result = {
+                "diagnostic": result["diagnostic"],
+                "tips": result["tips"],
+            }
 
             supabase.table("ai_capture_jobs").update({
                 "status": "completed",
@@ -85,14 +223,16 @@ def main():
             supabase.table("ml_inferences").insert({
                 "device_id": device_id,
                 "result": {"vision": vision_result, "llm": llm_result},
-                "diagnostic": llm_result.get("diagnostic", ""),
-                "tips": llm_result.get("tips", []),
-                "image_url": image_url,
-                "model_version": "stub",
+                "diagnostic": result["diagnostic"],
+                "tips": result["tips"],
+                "image_url": image_storage_path,
+                "model_version": model_version,
                 "job_id": job_id,
             }).execute()
 
-            print(f"Processed job {job_id}")
+            print(f"  -> Done. State: {result['plant_state']} | {result['diagnostic'][:80]}...")
+            current_job_id = None
+
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             if current_job_id:
