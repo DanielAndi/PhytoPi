@@ -62,11 +62,17 @@ def capture_with_usb_camera(out_path: Path) -> bool:
 def main():
     device_id = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SUPABASE_DEVICE_ID")
     url = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("SUPABASE_URL")
-    key = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("SUPABASE_ANON_KEY")
+    # Prefer service role key (bypasses RLS) when available; fall back to anon key
+    key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or os.environ.get("SUPABASE_ANON_KEY")
+    )
+    if len(sys.argv) > 3:
+        key = sys.argv[3]
 
     if not device_id or not url or not key:
         print("Usage: capture_and_upload.py <device_id> [url] [key]", file=sys.stderr)
-        print("Or set SUPABASE_DEVICE_ID, SUPABASE_URL, SUPABASE_ANON_KEY", file=sys.stderr)
+        print("Or set SUPABASE_DEVICE_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_ANON_KEY)", file=sys.stderr)
         sys.exit(1)
 
     ts = int(time.time())
