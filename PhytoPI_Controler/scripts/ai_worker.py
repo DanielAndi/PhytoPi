@@ -74,16 +74,15 @@ try:
             print("Loading Moondream2 from HuggingFace (first run downloads ~2 GB, please wait)...", file=sys.stderr)
             # Use all available CPU cores for faster inference
             torch.set_num_threads(os.cpu_count() or 4)
-            # Use float32 on CPU; bfloat16 only works well on CUDA/MPS
-            dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
             device = "cuda" if torch.cuda.is_available() else "cpu"
+            # torch_dtype is handled by transformers before the model __init__ receives kwargs
+            torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
             _model = AutoModelForCausalLM.from_pretrained(
                 "vikhyatk/moondream2",
                 revision="2024-08-26",
                 trust_remote_code=True,
-                dtype=dtype,
-                device_map=device,
-            )
+                torch_dtype=torch_dtype,
+            ).to(device)
             print(f"Moondream2 loaded on {device} ({torch.get_num_threads()} threads).", file=sys.stderr)
         return _model
 
