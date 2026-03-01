@@ -373,6 +373,7 @@ int main()
     time_t last_threshold_fetch = 0;
     time_t last_schedule_fetch = 0;
     int lights_on = 0;
+    time_t lights_off_at = 0;     /* Auto-off lights at this time (0 = no timeout) */
     int pump_on = 0;
     time_t pump_off_at = 0;       /* Auto-off pump at this time (0 = no timeout) */
     time_t ventilation_off_at = 0; /* Auto-off fans at this time (0 = no ventilation run) */
@@ -448,6 +449,15 @@ int main()
                     "sensor_failure", "Photoelectric water level sensor unreachable",
                     "high", "automated") == 0)
                 last_photo_alert = now;
+        }
+
+        /* Lights timeout: auto-off when duration_sec elapsed */
+        if (lights_on && lights_off_at && now >= lights_off_at)
+        {
+            lights_set(0);
+            lights_on = 0;
+            lights_off_at = 0;
+            printf("  -> Lights auto-off (timeout)\n");
         }
 
         /* Pump timeout: auto-off when duration_sec elapsed */
@@ -592,18 +602,25 @@ int main()
                     if (strcmp(cmd.command_type, "toggle_light") == 0)
                     {
                         int desired = 0;
+                        int duration_sec = 0;
                         json_object *obj = json_tokener_parse(cmd.payload_json);
                         if (obj)
                         {
-                            json_object *s = NULL;
+                            json_object *s = NULL, *d = NULL;
                             if (json_object_object_get_ex(obj, "state", &s))
                                 desired = json_object_get_boolean(s) ? 1 : 0;
+                            if (json_object_object_get_ex(obj, "duration_sec", &d))
+                                duration_sec = json_object_get_int(d);
                             json_object_put(obj);
                         }
                         if (lights_init() == 0 && lights_set(desired) == 0)
                         {
                             lights_on = desired;
+                            lights_off_at = (desired && duration_sec > 0) ? (time(NULL) + duration_sec) : 0;
                             ok = 1;
+                            printf("  -> Lights %s (duration=%ds, auto-off=%s)\n",
+                                   desired ? "ON" : "OFF", duration_sec,
+                                   lights_off_at ? "yes" : "no");
                         }
                     }
                     else if (strcmp(cmd.command_type, "toggle_pump") == 0)
@@ -821,6 +838,9 @@ int main()
                             {
                                 lights_set(state);
                                 lights_on = state;
+                                lights_off_at = (state && duration > 0) ? (now + duration) : 0;
+                                if (lights_off_at)
+                                    printf("  -> Lights ON (auto-off in %ds)\n", duration);
                             }
                             else if (strcmp(sched[s].schedule_type, "pump") == 0 && pump_init() == 0)
                             {

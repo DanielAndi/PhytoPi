@@ -572,12 +572,14 @@ class _AlertsScreenState extends State<AlertsScreen>
                   value: state,
                   onChanged: (v) => setState(() => state = v),
                 ),
-                if (selectedType == 'pump' || selectedType == 'ventilation')
+                if (selectedType == 'lights' || selectedType == 'pump' || selectedType == 'ventilation')
                   TextField(
                     controller: durationController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Duration (seconds)',
-                      hintText: 'How long to run (e.g. 30)',
+                      hintText: selectedType == 'lights'
+                          ? 'How long to stay on (0 = indefinitely)'
+                          : 'How long to run (e.g. 30)',
                     ),
                     keyboardType: TextInputType.number,
                   ),
@@ -598,8 +600,8 @@ class _AlertsScreenState extends State<AlertsScreen>
                 }
                 Navigator.pop(ctx);
                 final payload = <String, dynamic>{'state': state};
-                if (selectedType == 'pump' || selectedType == 'ventilation') {
-                  payload['duration_sec'] = int.tryParse(durationController.text) ?? 30;
+                if (selectedType == 'lights' || selectedType == 'pump' || selectedType == 'ventilation') {
+                  payload['duration_sec'] = int.tryParse(durationController.text) ?? (selectedType == 'lights' ? 0 : 30);
                 }
                 if (selectedType == 'ventilation') payload['duty_percent'] = 80;
                 try {
@@ -628,7 +630,9 @@ class _AlertsScreenState extends State<AlertsScreen>
     final intervalController = TextEditingController(text: (s['interval_seconds'] as int?)?.toString() ?? '');
     final payload = s['payload'] as Map<String, dynamic>? ?? {};
     var state = payload['state'] as bool? ?? true;
-    final durationController = TextEditingController(text: (payload['duration_sec'] as int?)?.toString() ?? '30');
+    final scheduleType = s['schedule_type'] as String? ?? 'lights';
+    final durationDefault = scheduleType == 'lights' ? '0' : '30';
+    final durationController = TextEditingController(text: (payload['duration_sec'] as int?)?.toString() ?? durationDefault);
     var enabled = s['enabled'] as bool? ?? true;
     final id = s['id'] as String? ?? '';
 
@@ -667,7 +671,8 @@ class _AlertsScreenState extends State<AlertsScreen>
             FilledButton(
               onPressed: () async {
                 Navigator.pop(ctx);
-                final payload = <String, dynamic>{'state': state, 'duration_sec': int.tryParse(durationController.text) ?? 30};
+                final durationDefault = scheduleType == 'lights' ? 0 : 30;
+                final payload = <String, dynamic>{'state': state, 'duration_sec': int.tryParse(durationController.text) ?? durationDefault};
                 try {
                   await deviceProvider.updateSchedule(
                     id,
