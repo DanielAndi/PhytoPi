@@ -52,14 +52,10 @@ class DeviceProvider extends ChangeNotifier {
 
   Future<void> _sendCommand(String commandType, Map<String, dynamic> payload) async {
     if (!SupabaseConfig.isInitialized) {
-      _error = 'Supabase not configured';
-      notifyListeners();
-      return;
+      throw Exception('Supabase not configured — cannot send command');
     }
     if (_selectedDevice == null) {
-      _error = 'No device selected';
-      notifyListeners();
-      return;
+      throw Exception('No device selected — cannot send command');
     }
     await SupabaseConfig.client!
         .from(SupabaseConfig.deviceCommandsTable)

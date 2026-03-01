@@ -145,9 +145,13 @@ class _AlertsScreenState extends State<AlertsScreen>
             icon: Icons.lightbulb,
             onPressed: () async {
               final target = !_lightsOn;
-              await deviceProvider.toggleGrowLights(target);
-              if (mounted) setState(() => _lightsOn = target);
-              _showSnack('Lights ${target ? "ON" : "OFF"}');
+              try {
+                await deviceProvider.toggleGrowLights(target);
+                if (mounted) setState(() => _lightsOn = target);
+                _showSnack('Lights ${target ? "ON" : "OFF"}');
+              } catch (e) {
+                _showSnack('Failed to toggle lights: $e');
+              }
             },
             state: _lightsOn,
           ),
@@ -156,9 +160,13 @@ class _AlertsScreenState extends State<AlertsScreen>
             icon: Icons.water_drop,
             onPressed: () async {
               final target = !_pumpOn;
-              await deviceProvider.togglePump(target, durationSec: 30);
-              if (mounted) setState(() => _pumpOn = target);
-              _showSnack('Pump ${target ? "ON" : "OFF"} (30s)');
+              try {
+                await deviceProvider.togglePump(target, durationSec: 30);
+                if (mounted) setState(() => _pumpOn = target);
+                _showSnack('Pump ${target ? "ON" : "OFF"} (30s)');
+              } catch (e) {
+                _showSnack('Failed to toggle pump: $e');
+              }
             },
             state: _pumpOn,
           ),
@@ -167,17 +175,25 @@ class _AlertsScreenState extends State<AlertsScreen>
             icon: Icons.air,
             onPressed: () async {
               final target = !_fansOn;
-              await deviceProvider.toggleFans(target);
-              if (mounted) setState(() => _fansOn = target);
-              _showSnack('Fans ${target ? "ON" : "OFF"}');
+              try {
+                await deviceProvider.toggleFans(target);
+                if (mounted) setState(() => _fansOn = target);
+                _showSnack('Fans ${target ? "ON" : "OFF"}');
+              } catch (e) {
+                _showSnack('Failed to toggle fans: $e');
+              }
             },
             state: _fansOn,
           ),
           const SizedBox(height: 24),
           OutlinedButton.icon(
             onPressed: () async {
-              await deviceProvider.runVentilation(durationSec: 300, dutyPercent: 80);
-              _showSnack('Ventilation run for 5 min');
+              try {
+                await deviceProvider.runVentilation(durationSec: 300, dutyPercent: 80);
+                _showSnack('Ventilation run for 5 min');
+              } catch (e) {
+                _showSnack('Failed to run ventilation: $e');
+              }
             },
             icon: const Icon(Icons.air),
             label: const Text('Run Ventilation (5 min)'),

@@ -560,11 +560,22 @@ int main()
                                 duration_sec = json_object_get_int(d);
                             json_object_put(obj);
                         }
-                        if (pump_init() == 0 && pump_set(desired) == 0)
+                        if (pump_init() != 0)
+                        {
+                            fprintf(stderr, "toggle_pump: pump_init() failed - check GPIO permissions and wiring\n");
+                        }
+                        else if (pump_set(desired) != 0)
+                        {
+                            fprintf(stderr, "toggle_pump: pump_set(%d) failed\n", desired);
+                        }
+                        else
                         {
                             pump_on = desired;
                             pump_off_at = (desired && duration_sec > 0) ? (time(NULL) + duration_sec) : 0;
                             ok = 1;
+                            printf("  -> Pump %s (duration=%ds, auto-off=%s)\n",
+                                   desired ? "ON" : "OFF", duration_sec,
+                                   pump_off_at ? "yes" : "no");
                         }
                     }
                     else if (strcmp(cmd.command_type, "toggle_fans") == 0)
