@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <stdint.h>
+#include <limits.h>
 #include <linux/i2c-dev.h>
 #include <sys/ioctl.h>
 
@@ -20,11 +21,11 @@
 #define BME680_I2C_ADDR_76  0x76
 #define BME680_I2C_ADDR_77  0x77
 #define IIO_PATH         "/sys/bus/iio/devices"
-#define MAX_PATH         256
+#define IIO_PATH_MAX     512  /* IIO paths are short; avoid truncation warnings */
 
 static int i2c_fd = -1;
 static uint8_t bme680_i2c_addr = BME680_I2C_ADDR_76;
-static char iio_device_path[MAX_PATH] = {0};
+static char iio_device_path[IIO_PATH_MAX] = {0};
 static int use_iio = 0;
 static struct bme68x_dev bme_dev;
 static int bme_initialized = 0;
@@ -32,7 +33,7 @@ static int bme_initialized = 0;
 /* ----- IIO path (Linux kernel driver) ----- */
 static int read_iio_value(const char *base, const char *attr, float *out)
 {
-    char path[MAX_PATH];
+    char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/%s", base, attr);
     int fd = open(path, O_RDONLY);
     if (fd < 0)
@@ -61,7 +62,7 @@ static int find_bme680_iio(void)
         if (ent->d_name[0] == '.')
             continue;
 
-        char path[MAX_PATH];
+        char path[PATH_MAX];
         snprintf(path, sizeof(path), "%s/%s/name", IIO_PATH, ent->d_name);
         int fd = open(path, O_RDONLY);
         if (fd < 0)
