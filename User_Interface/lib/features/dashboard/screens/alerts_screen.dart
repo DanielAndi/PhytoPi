@@ -14,6 +14,10 @@ class AlertsScreen extends StatefulWidget {
 class _AlertsScreenState extends State<AlertsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final ScrollController _alertsScrollController = ScrollController();
+  final ScrollController _commandsScrollController = ScrollController();
+  final ScrollController _schedulesScrollController = ScrollController();
+  final ScrollController _thresholdsScrollController = ScrollController();
   bool _lightsOn = false;
   bool _pumpOn = false;
   bool _fansOn = false;
@@ -28,6 +32,10 @@ class _AlertsScreenState extends State<AlertsScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _alertsScrollController.dispose();
+    _commandsScrollController.dispose();
+    _schedulesScrollController.dispose();
+    _thresholdsScrollController.dispose();
     super.dispose();
   }
 
@@ -83,8 +91,11 @@ class _AlertsScreenState extends State<AlertsScreen>
     final alertHistory = deviceProvider.alertHistory;
 
     return ListView(
+      controller: _alertsScrollController,
+      primary: false,
       padding: const EdgeInsets.all(16),
       dragStartBehavior: DragStartBehavior.down,
+      physics: const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       children: [
         // Active Alerts
         Text('Active Alerts', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
@@ -210,8 +221,11 @@ class _AlertsScreenState extends State<AlertsScreen>
     final theme = Theme.of(context);
 
     return SingleChildScrollView(
+      controller: _commandsScrollController,
+      primary: false,
       padding: const EdgeInsets.all(24),
       dragStartBehavior: DragStartBehavior.down,
+      physics: const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -340,8 +354,11 @@ class _AlertsScreenState extends State<AlertsScreen>
     final schedules = deviceProvider.schedules;
 
     return ListView(
+      controller: _schedulesScrollController,
+      primary: false,
       padding: const EdgeInsets.all(16),
       dragStartBehavior: DragStartBehavior.down,
+      physics: const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       children: [
         Text(
           'Automate lights, pump, or ventilation. The device checks schedules every 60 seconds.',
@@ -778,8 +795,11 @@ class _AlertsScreenState extends State<AlertsScreen>
     final thresholds = deviceProvider.thresholds;
 
     return ListView(
+      controller: _thresholdsScrollController,
+      primary: false,
       padding: const EdgeInsets.all(16),
       dragStartBehavior: DragStartBehavior.down,
+      physics: const ClampingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       children: [
         Text(
           'Thresholds define min/max ranges for alerts. The device checks every 60 seconds.',
