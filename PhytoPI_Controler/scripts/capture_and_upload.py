@@ -31,13 +31,18 @@ def main():
     ts = int(time.time())
     out_path = Path(f"/tmp/phytopi_capture_{ts}.jpg")
 
-    # Capture with libcamera-still (Raspberry Pi)
+    # Prefer rpicam-still (Bookworm), fall back to libcamera-still (Bullseye)
+    capture_cmd = None
+    if subprocess.run(["which", "rpicam-still"], capture_output=True).returncode == 0:
+        capture_cmd = ["rpicam-still", "-o", str(out_path), "-t", "1000", "-n"]
+    elif subprocess.run(["which", "libcamera-still"], capture_output=True).returncode == 0:
+        capture_cmd = ["libcamera-still", "-o", str(out_path), "-t", "1000", "-n"]
+    if not capture_cmd:
+        print("Capture failed: neither rpicam-still nor libcamera-still found", file=sys.stderr)
+        sys.exit(2)
+
     try:
-        subprocess.run(
-            ["libcamera-still", "-o", str(out_path), "-t", "1000", "-n"],
-            check=True,
-            capture_output=True,
-        )
+        subprocess.run(capture_cmd, check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"Capture failed: {e}", file=sys.stderr)
         sys.exit(2)
