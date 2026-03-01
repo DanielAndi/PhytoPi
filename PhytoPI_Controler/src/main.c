@@ -299,7 +299,7 @@ int main()
     const char *db_path = getenv("PHYTOPI_DB_PATH");
     if (!db_path || db_path[0] == '\0')
     {
-        static char db_path_buf[512];
+        static char db_path_buf[1024];
         const char *home = getenv("HOME");
         if (home && home[0] != '\0')
         {
