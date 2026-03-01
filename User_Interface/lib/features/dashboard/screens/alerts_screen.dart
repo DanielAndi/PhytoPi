@@ -821,6 +821,11 @@ class _AlertsScreenState extends State<AlertsScreen>
     final maxVal = t['max_value'] as num?;
     final enabled = t['enabled'] as bool? ?? true;
     final id = t['id'] as String? ?? '';
+    final isWaterLowMetric = metric == 'water_level_low';
+    final waterCutoff = ((maxVal ?? minVal) as num?)?.toDouble();
+    final detailsText = isWaterLowMetric
+        ? 'Alert when water frequency drops below ${waterCutoff != null ? "${waterCutoff.toStringAsFixed(0)} Hz" : "configured cutoff"} ${enabled ? "" : "(disabled)"}'
+        : 'Min: ${minVal != null ? minVal.toStringAsFixed(1) : "—"}  |  Max: ${maxVal != null ? maxVal.toStringAsFixed(1) : "—"}  ${enabled ? "" : "(disabled)"}';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -830,9 +835,7 @@ class _AlertsScreenState extends State<AlertsScreen>
           color: enabled ? theme.primaryColor : theme.disabledColor,
         ),
         title: Text(label),
-        subtitle: Text(
-          'Min: ${minVal != null ? minVal.toStringAsFixed(1) : "—"}  |  Max: ${maxVal != null ? maxVal.toStringAsFixed(1) : "—"}  ${enabled ? "" : "(disabled)"}',
-        ),
+        subtitle: Text(detailsText),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

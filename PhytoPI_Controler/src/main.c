@@ -25,7 +25,7 @@
 #define THRESH_PRESSURE 2     // 2 hPa
 #define THRESH_GAS 5          // 5 kOhm
 #define THRESH_PHOTO_WATER 5  // 5 Hz
-#define WATER_LEVEL_LOW_HZ 50   // Photoelectric: below this = low water (20Hz = empty)
+#define WATER_LEVEL_LOW_HZ_DEFAULT 50   // Default low-water cutoff (Hz) if threshold row has no value
 /* 5-state frequency bands (Hz): 20=empty, 50=DP1, 100=DP2, 200=DP3, 400=DP4. Hysteresis 8 Hz. */
 #define WATER_BAND_0_MAX 35     /* <35 Hz = Empty (0) */
 #define WATER_BAND_1_MIN 27     /* 35-75 = Low (1), hysteresis: exit at 27 */
@@ -549,7 +549,6 @@ int main()
         static int last_photo_freq = -999;
         static int last_water_state = -1;
         static time_t last_photo_ts = 0;
-        static time_t last_water_low_alert = 0;
         if (photo_freq >= 0) {
             int water_state = frequency_to_water_state(photo_freq, last_water_state);
             if (water_state != last_water_state ||
@@ -561,19 +560,6 @@ int main()
                     last_photo_freq = photo_freq;
                     last_water_state = water_state;
                     last_photo_ts = now;
-                }
-            }
-            /* Water level low alert (with cooldown) */
-            if (photo_freq >= 0 && photo_freq < WATER_LEVEL_LOW_HZ &&
-                supabase_enabled && supabase_cfg.device_id &&
-                (now - last_water_low_alert) >= WATER_ALERT_COOLDOWN)
-            {
-                if (supabase_insert_alert(&supabase_cfg, supabase_cfg.device_id,
-                        "water_level_low", "Water level is low - refill reservoir",
-                        "high", "threshold") == 0)
-                {
-                    last_water_low_alert = now;
-                    printf("  -> Water level low alert sent\n");
                 }
             }
         }
@@ -754,26 +740,46 @@ int main()
                         double val = -999;
                         time_t *cooldown_ptr = NULL;
                         const char *metric = thr[t].metric;
+                        int cooldown_seconds = THRESHOLD_ALERT_COOLDOWN;
                         if (strcmp(metric, "temp_c") == 0) { val = bme_temp; cooldown_ptr = &last_thr_alert_temp; }
                         else if (strcmp(metric, "humidity") == 0) { val = bme_hum; cooldown_ptr = &last_thr_alert_hum; }
                         else if (strcmp(metric, "pressure") == 0) { val = bme_pressure; cooldown_ptr = &last_thr_alert_pressure; }
                         else if (strcmp(metric, "gas_resistance") == 0) { val = bme_gas; cooldown_ptr = &last_thr_alert_gas; }
-                        else if (strcmp(metric, "water_level_low") == 0) { val = (photo_freq >= 0 && photo_freq < WATER_LEVEL_LOW_HZ) ? 1 : 0; cooldown_ptr = &last_thr_alert_water; }
+                        else if (strcmp(metric, "water_level_low") == 0) {
+                            val = (double)photo_freq;
+                            cooldown_ptr = &last_thr_alert_water;
+                            cooldown_seconds = WATER_ALERT_COOLDOWN;
+                        }
                         if (val < -900 && strcmp(metric, "water_level_low") != 0) continue;
                         int exceeded = 0;
-                        if (strcmp(metric, "water_level_low") == 0)
-                            exceeded = (val > 0);
+                        if (strcmp(metric, "water_level_low") == 0) {
+                            double low_hz_cutoff = WATER_LEVEL_LOW_HZ_DEFAULT;
+                            if (thr[t].max_value < 1e8)
+                                low_hz_cutoff = thr[t].max_value;
+                            else if (thr[t].min_value > -1e8)
+                                low_hz_cutoff = thr[t].min_value;
+                            exceeded = (photo_freq >= 0 && val < low_hz_cutoff);
+                        }
                         else
                             exceeded = (thr[t].min_value > -1e8 && val < thr[t].min_value) ||
                                        (thr[t].max_value < 1e8 && val > thr[t].max_value);
-                        if (exceeded && cooldown_ptr && (now - *cooldown_ptr) >= THRESHOLD_ALERT_COOLDOWN)
+                        if (exceeded && cooldown_ptr && (now - *cooldown_ptr) >= cooldown_seconds)
                         {
                             char msg[128];
                             if (strcmp(metric, "water_level_low") == 0)
-                                snprintf(msg, sizeof(msg), "Water level low (photoelectric)");
+                            {
+                                double low_hz_cutoff = WATER_LEVEL_LOW_HZ_DEFAULT;
+                                if (thr[t].max_value < 1e8)
+                                    low_hz_cutoff = thr[t].max_value;
+                                else if (thr[t].min_value > -1e8)
+                                    low_hz_cutoff = thr[t].min_value;
+                                snprintf(msg, sizeof(msg), "Water level is low - refill reservoir (%.0fHz < %.0fHz)", val, low_hz_cutoff);
+                            }
                             else
                                 snprintf(msg, sizeof(msg), "%s %.1f outside range [%.1f, %.1f]", metric, val, thr[t].min_value, thr[t].max_value);
-                            if (supabase_insert_alert(&supabase_cfg, supabase_cfg.device_id, "threshold", msg, "medium", "threshold") == 0)
+                            const char *alert_type = (strcmp(metric, "water_level_low") == 0) ? "water_level_low" : "threshold";
+                            const char *severity = (strcmp(metric, "water_level_low") == 0) ? "high" : "medium";
+                            if (supabase_insert_alert(&supabase_cfg, supabase_cfg.device_id, alert_type, msg, severity, "threshold") == 0)
                             {
                                 *cooldown_ptr = now;
                                 if (strcmp(metric, "temp_c") == 0 || strcmp(metric, "humidity") == 0 || strcmp(metric, "gas_resistance") == 0)
