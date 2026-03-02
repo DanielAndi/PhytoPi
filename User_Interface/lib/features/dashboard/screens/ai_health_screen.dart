@@ -8,10 +8,14 @@ import '../providers/device_provider.dart';
 import '../widgets/mjpeg_view.dart';
 
 // ---------------------------------------------------------------------------
-// Live stream widget — isolated so data refreshes never rebuild/destroy it
+// Live stream widget — isolated so data refreshes never rebuild/destroy it.
+// The [visible] flag lets the parent hide the platform view before showing
+// overlays; on Flutter Web the HtmlElementView always renders above Flutter
+// overlays, so it must be removed from the tree before a modal is shown.
 // ---------------------------------------------------------------------------
 class _LiveStreamSection extends StatefulWidget {
-  const _LiveStreamSection();
+  final bool visible;
+  const _LiveStreamSection({this.visible = true});
 
   @override
   State<_LiveStreamSection> createState() => _LiveStreamSectionState();
@@ -59,50 +63,55 @@ class _LiveStreamSectionState extends State<_LiveStreamSection> {
             borderRadius: BorderRadius.circular(12),
           ),
           clipBehavior: Clip.antiAlias,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (_loading)
-                const Center(
-                    child: CircularProgressIndicator(color: Colors.white))
-              else
-                MjpegView(url: _streamUrl, fit: BoxFit.contain),
-              if (_disconnected)
-                Container(
-                  color: Colors.black54,
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.videocam_off,
-                            size: 48, color: Colors.white70),
-                        const SizedBox(height: 8),
-                        const Text('Stream disconnected',
-                            style: TextStyle(color: Colors.white70)),
-                        const SizedBox(height: 16),
-                        FilledButton.icon(
-                          onPressed: _start,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Retry'),
+          child: !widget.visible
+              ? const Center(
+                  child: Icon(Icons.videocam,
+                      size: 48, color: Colors.white24),
+                )
+              : Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (_loading)
+                      const Center(
+                          child: CircularProgressIndicator(color: Colors.white))
+                    else
+                      MjpegView(url: _streamUrl, fit: BoxFit.contain),
+                    if (_disconnected)
+                      Container(
+                        color: Colors.black54,
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.videocam_off,
+                                  size: 48, color: Colors.white70),
+                              const SizedBox(height: 8),
+                              const Text('Stream disconnected',
+                                  style: TextStyle(color: Colors.white70)),
+                              const SizedBox(height: 16),
+                              FilledButton.icon(
+                                onPressed: _start,
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Retry'),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
+                      ),
+                    Positioned(
+                      bottom: 8,
+                      right: 8,
+                      child: TextButton.icon(
+                        onPressed: _start,
+                        icon: const Icon(Icons.refresh,
+                            size: 18, color: Colors.white70),
+                        label: const Text('Retry',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 12)),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              Positioned(
-                bottom: 8,
-                right: 8,
-                child: TextButton.icon(
-                  onPressed: _start,
-                  icon: const Icon(Icons.refresh,
-                      size: 18, color: Colors.white70),
-                  label: const Text('Retry',
-                      style:
-                          TextStyle(color: Colors.white70, fontSize: 12)),
-                ),
-              ),
-            ],
-          ),
         ),
       ],
     );
@@ -130,6 +139,7 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
   String? _currentDeviceId;
   final Map<String, Future<String>> _signedUrlFutureCache = {};
   bool _loadInFlight = false;
+  bool _historySheetVisible = false;
 
   @override
   void initState() {
@@ -308,16 +318,30 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
         '${local.minute.toString().padLeft(2, '0')}';
   }
 
-  void _showHistorySheet() {
-    showModalBottomSheet<void>(
+  Future<void> _showHistorySheet() async {
+    // Hide the live-stream platform view BEFORE the overlay appears.
+    // On Flutter Web, HtmlElementView always renders above Flutter overlays,
+    // so the bottom sheet would be invisible behind the video stream unless
+    // we remove the platform view from the tree first.
+    setState(() => _historySheetVisible = true);
+
+    // Yield one frame so the rebuild removes the HtmlElementView before the
+    // sheet route is pushed.
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+
+    final jobs = List<Map<String, dynamic>>.from(_historyJobs);
+
+    await showModalBottomSheet<void>(
       context: context,
+      useRootNavigator: true,
       isScrollControlled: true,
       builder: (ctx) {
         final theme = Theme.of(ctx);
         return SafeArea(
           child: SizedBox(
             height: MediaQuery.of(ctx).size.height * 0.86,
-            child: _historyJobs.isEmpty
+            child: jobs.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -353,11 +377,11 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
                         child: ListView.separated(
                           padding: const EdgeInsets.fromLTRB(
                               16, 4, 16, 16),
-                          itemCount: _historyJobs.length,
+                          itemCount: jobs.length,
                           separatorBuilder: (_, __) =>
                               const SizedBox(height: 8),
                           itemBuilder: (_, index) {
-                            final job = _historyJobs[index];
+                            final job = jobs[index];
                             final llm = _asMap(job['llm_result']);
                             final vision =
                                 _asMap(job['vision_result']);
@@ -460,6 +484,8 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
         );
       },
     );
+
+    if (mounted) setState(() => _historySheetVisible = false);
   }
 
   Future<void> _triggerCapture() async {
@@ -605,8 +631,9 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
             ),
             const SizedBox(height: 24),
 
-            // ── LIVE STREAM — isolated widget, never rebuilt by data refreshes
-            const _LiveStreamSection(),
+            // ── LIVE STREAM — hidden while the history sheet is open so the
+            // platform view (HtmlElementView on web) doesn't render above it.
+            _LiveStreamSection(visible: !_historySheetVisible),
             const SizedBox(height: 24),
 
             // Health status banner
