@@ -372,6 +372,13 @@ int main()
     time_t last_command_poll = time(NULL);
     time_t last_threshold_fetch = 0;
     time_t last_schedule_fetch = 0;
+
+    /* Cached thresholds — fetched from Supabase every 60s, evaluated every loop iteration */
+    device_threshold_t *cached_thresholds = NULL;
+    int cached_thr_count = 0;
+    time_t last_thr_alert_temp = 0, last_thr_alert_hum = 0;
+    time_t last_thr_alert_gas = 0, last_thr_alert_pressure = 0;
+    time_t last_thr_alert_water = 0;
     int lights_on = 0;
     time_t lights_off_at = 0;     /* Auto-off lights at this time (0 = no timeout) */
     int pump_on = 0;
@@ -723,75 +730,90 @@ int main()
                 }
             }
 
-            /* Threshold evaluation (every 60s) */
+            /* Refresh threshold cache from Supabase every 60s */
             if (now - last_threshold_fetch >= 60)
             {
                 last_threshold_fetch = now;
-                device_threshold_t *thr = NULL;
-                int thr_count = 0;
-                if (supabase_fetch_thresholds(&supabase_cfg, &thr, &thr_count) >= 0 && thr)
+                device_threshold_t *fetched = NULL;
+                int fetched_count = 0;
+                if (supabase_fetch_thresholds(&supabase_cfg, &fetched, &fetched_count) >= 0 && fetched)
                 {
-                    static time_t last_thr_alert_temp = 0, last_thr_alert_hum = 0;
-                    static time_t last_thr_alert_gas = 0, last_thr_alert_pressure = 0;
-                    static time_t last_thr_alert_water = 0;
-                    for (int t = 0; t < thr_count; t++)
+                    if (cached_thresholds) free(cached_thresholds);
+                    cached_thresholds = fetched;
+                    cached_thr_count = fetched_count;
+                    printf("  [Thresholds] Refreshed %d threshold(s) from Supabase\n", cached_thr_count);
+                }
+                else
+                {
+                    fprintf(stderr, "  [Thresholds] Failed to fetch from Supabase (using cached %d)\n", cached_thr_count);
+                }
+            }
+
+            /* Evaluate cached thresholds on every iteration so spikes are never missed */
+            for (int t = 0; t < cached_thr_count; t++)
+            {
+                if (!cached_thresholds[t].enabled) continue;
+                double val = -999;
+                time_t *cooldown_ptr = NULL;
+                const char *metric = cached_thresholds[t].metric;
+                int cooldown_seconds = THRESHOLD_ALERT_COOLDOWN;
+                if (strcmp(metric, "temp_c") == 0)          { val = bme_temp;     cooldown_ptr = &last_thr_alert_temp; }
+                else if (strcmp(metric, "humidity") == 0)   { val = bme_hum;      cooldown_ptr = &last_thr_alert_hum; }
+                else if (strcmp(metric, "pressure") == 0)   { val = bme_pressure; cooldown_ptr = &last_thr_alert_pressure; }
+                else if (strcmp(metric, "gas_resistance") == 0) { val = bme_gas;  cooldown_ptr = &last_thr_alert_gas; }
+                else if (strcmp(metric, "water_level_low") == 0) {
+                    val = (double)photo_freq;
+                    cooldown_ptr = &last_thr_alert_water;
+                    cooldown_seconds = WATER_ALERT_COOLDOWN;
+                }
+                if (val < -900 && strcmp(metric, "water_level_low") != 0) continue;
+                int exceeded = 0;
+                if (strcmp(metric, "water_level_low") == 0) {
+                    double low_hz_cutoff = WATER_LEVEL_LOW_HZ_DEFAULT;
+                    if (cached_thresholds[t].max_value < 1e8)
+                        low_hz_cutoff = cached_thresholds[t].max_value;
+                    else if (cached_thresholds[t].min_value > -1e8)
+                        low_hz_cutoff = cached_thresholds[t].min_value;
+                    exceeded = (photo_freq >= 0 && val < low_hz_cutoff);
+                }
+                else
+                    exceeded = (cached_thresholds[t].min_value > -1e8 && val < cached_thresholds[t].min_value) ||
+                               (cached_thresholds[t].max_value < 1e8 && val > cached_thresholds[t].max_value);
+                if (exceeded && cooldown_ptr && (now - *cooldown_ptr) >= cooldown_seconds)
+                {
+                    char msg[128];
+                    if (strcmp(metric, "water_level_low") == 0)
                     {
-                        if (!thr[t].enabled) continue;
-                        double val = -999;
-                        time_t *cooldown_ptr = NULL;
-                        const char *metric = thr[t].metric;
-                        int cooldown_seconds = THRESHOLD_ALERT_COOLDOWN;
-                        if (strcmp(metric, "temp_c") == 0) { val = bme_temp; cooldown_ptr = &last_thr_alert_temp; }
-                        else if (strcmp(metric, "humidity") == 0) { val = bme_hum; cooldown_ptr = &last_thr_alert_hum; }
-                        else if (strcmp(metric, "pressure") == 0) { val = bme_pressure; cooldown_ptr = &last_thr_alert_pressure; }
-                        else if (strcmp(metric, "gas_resistance") == 0) { val = bme_gas; cooldown_ptr = &last_thr_alert_gas; }
-                        else if (strcmp(metric, "water_level_low") == 0) {
-                            val = (double)photo_freq;
-                            cooldown_ptr = &last_thr_alert_water;
-                            cooldown_seconds = WATER_ALERT_COOLDOWN;
-                        }
-                        if (val < -900 && strcmp(metric, "water_level_low") != 0) continue;
-                        int exceeded = 0;
-                        if (strcmp(metric, "water_level_low") == 0) {
-                            double low_hz_cutoff = WATER_LEVEL_LOW_HZ_DEFAULT;
-                            if (thr[t].max_value < 1e8)
-                                low_hz_cutoff = thr[t].max_value;
-                            else if (thr[t].min_value > -1e8)
-                                low_hz_cutoff = thr[t].min_value;
-                            exceeded = (photo_freq >= 0 && val < low_hz_cutoff);
-                        }
-                        else
-                            exceeded = (thr[t].min_value > -1e8 && val < thr[t].min_value) ||
-                                       (thr[t].max_value < 1e8 && val > thr[t].max_value);
-                        if (exceeded && cooldown_ptr && (now - *cooldown_ptr) >= cooldown_seconds)
+                        double low_hz_cutoff = WATER_LEVEL_LOW_HZ_DEFAULT;
+                        if (cached_thresholds[t].max_value < 1e8)
+                            low_hz_cutoff = cached_thresholds[t].max_value;
+                        else if (cached_thresholds[t].min_value > -1e8)
+                            low_hz_cutoff = cached_thresholds[t].min_value;
+                        snprintf(msg, sizeof(msg), "Water level is low - refill reservoir (%.0fHz < %.0fHz)", val, low_hz_cutoff);
+                    }
+                    else
+                        snprintf(msg, sizeof(msg), "%s %.1f outside range [%.1f, %.1f]",
+                                 metric, val, cached_thresholds[t].min_value, cached_thresholds[t].max_value);
+                    const char *alert_type = (strcmp(metric, "water_level_low") == 0) ? "water_level_low" : "threshold";
+                    const char *severity   = (strcmp(metric, "water_level_low") == 0) ? "high" : "medium";
+                    printf("  [Thresholds] EXCEEDED: %s\n", msg);
+                    if (supabase_insert_alert(&supabase_cfg, supabase_cfg.device_id,
+                                             alert_type, msg, severity, "threshold") == 0)
+                    {
+                        *cooldown_ptr = now;
+                        printf("  [Thresholds] Alert inserted for %s\n", metric);
+                        if (strcmp(metric, "temp_c") == 0 || strcmp(metric, "humidity") == 0 ||
+                            strcmp(metric, "gas_resistance") == 0)
                         {
-                            char msg[128];
-                            if (strcmp(metric, "water_level_low") == 0)
-                            {
-                                double low_hz_cutoff = WATER_LEVEL_LOW_HZ_DEFAULT;
-                                if (thr[t].max_value < 1e8)
-                                    low_hz_cutoff = thr[t].max_value;
-                                else if (thr[t].min_value > -1e8)
-                                    low_hz_cutoff = thr[t].min_value;
-                                snprintf(msg, sizeof(msg), "Water level is low - refill reservoir (%.0fHz < %.0fHz)", val, low_hz_cutoff);
-                            }
-                            else
-                                snprintf(msg, sizeof(msg), "%s %.1f outside range [%.1f, %.1f]", metric, val, thr[t].min_value, thr[t].max_value);
-                            const char *alert_type = (strcmp(metric, "water_level_low") == 0) ? "water_level_low" : "threshold";
-                            const char *severity = (strcmp(metric, "water_level_low") == 0) ? "high" : "medium";
-                            if (supabase_insert_alert(&supabase_cfg, supabase_cfg.device_id, alert_type, msg, severity, "threshold") == 0)
-                            {
-                                *cooldown_ptr = now;
-                                if (strcmp(metric, "temp_c") == 0 || strcmp(metric, "humidity") == 0 || strcmp(metric, "gas_resistance") == 0)
-                                {
-                                    if (fans_init() == 0)
-                                        fans_set_both(FAN_MIN_DUTY_WHEN_ON);
-                                    ventilation_off_at = now + 300;
-                                }
-                            }
+                            if (fans_init() == 0)
+                                fans_set_both(FAN_MIN_DUTY_WHEN_ON);
+                            ventilation_off_at = now + 300;
                         }
                     }
-                    free(thr);
+                    else
+                    {
+                        fprintf(stderr, "  [Thresholds] ERROR: Failed to insert alert for %s\n", metric);
+                    }
                 }
             }
 
@@ -881,6 +903,8 @@ int main()
         sleep(DATA_READ_INTERVAL);
         iteration++;
     }
+
+    if (cached_thresholds) free(cached_thresholds);
 
     if (supabase_enabled)
     {
