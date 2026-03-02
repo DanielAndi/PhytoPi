@@ -107,24 +107,34 @@ def _fetch_image_bytes(supabase, storage_path: str):
 # Real inference with Moondream
 # ---------------------------------------------------------------------------
 def _build_prompt(sensor_context: str) -> str:
-    # Keep the prompt compact — moondream:1.8b has a 2 K context window.
+    # Sensor readings are kept as individual lines so the model can reason
+    # about each value separately when writing environment_assessment.
     sensor_section = ""
     if sensor_context:
-        # Flatten multi-line sensor block into a single compact line.
         lines = [l.strip() for l in sensor_context.splitlines() if l.strip()]
-        sensor_section = " Sensors: " + "; ".join(lines) + "."
+        sensor_section = (
+            "\n\nCurrent grow-environment sensor readings:\n"
+            + "\n".join(f"  {l}" for l in lines)
+        )
 
     return (
-        f"Analyze this plant image.{sensor_section} "
-        "Reply ONLY with this JSON (no markdown fences, no extra text):\n"
-        '{"species":"<common name or Unknown>",'
-        '"health_status":"<healthy or needs_attention>",'
-        '"disease_signs":"<issues or None>",'
-        '"leaf_condition":"<colour, texture, spots>",'
-        '"growth_stage":"<seedling/vegetative/flowering/fruiting/mature>",'
-        '"soil_observation":"<visible moisture or Not visible>",'
-        '"diagnostic":"<2 sentence health summary>",'
-        '"tips":["<tip1>","<tip2>","<tip3>"]}'
+        "You are a plant health expert. Carefully examine the plant in this image."
+        f"{sensor_section}\n\n"
+        "ALL fields are REQUIRED — replace every placeholder with a real observation.\n"
+        "Reply ONLY with raw JSON (no markdown fences, no extra text):\n"
+        '{\n'
+        '  "species": "<common name and scientific name, or Unknown>",\n'
+        '  "health_status": "<healthy or needs_attention>",\n'
+        '  "leaf_color": "<primary and secondary leaf colours>",\n'
+        '  "leaf_area": "<sparse or moderate or dense>",\n'
+        '  "leaf_condition": "<texture, shape, spots, curling, or necrosis>",\n'
+        '  "growth_stage": "<seedling or vegetative or flowering or fruiting or mature>",\n'
+        '  "disease_signs": "<visible disease, pests, discoloration — or None>",\n'
+        '  "soil_observation": "<visible moisture level or root issues — or Not visible>",\n'
+        '  "environment_assessment": "<1 sentence: how the sensor readings support or stress this plant>",\n'
+        '  "diagnostic": "<2 sentence health summary integrating visual and sensor evidence>",\n'
+        '  "tips": ["<specific actionable tip 1>", "<specific actionable tip 2>", "<specific actionable tip 3>"]\n'
+        '}'
     )
 
 
@@ -236,6 +246,7 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
 
     diagnostic = _clean_str(data.get("diagnostic"), "")
     leaf_condition = _clean_str(data.get("leaf_condition"), "")
+    env_assessment = _clean_str(data.get("environment_assessment"), "")
 
     return {
         "observations": [leaf_condition] if leaf_condition else [],
@@ -252,6 +263,7 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
             "health_status": plant_state,
             "disease_signs": _clean_str(data.get("disease_signs"), "None visible"),
             "soil_observation": _clean_str(data.get("soil_observation"), "Not visible"),
+            "environment_assessment": env_assessment,
         },
     }
 
