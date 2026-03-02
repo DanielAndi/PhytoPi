@@ -271,64 +271,6 @@ def _fetch_sensor_readings(supabase, device_id: str) -> str:
         return ""
 
 
-def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
-    prompt = _build_prompt(sensor_context)
-    try:
-        response = _ollama.chat(
-            model=OLLAMA_MODEL,
-            messages=[{
-                "role": "user",
-                "content": prompt,
-                "images": [image_bytes],
-            }]
-        )
-        text = response["message"]["content"].strip()
-    except Exception as e:
-        print(f"Ollama inference error: {e}", file=sys.stderr)
-        return _stub_result(None)
-
-    data = _extract_json(text)
-
-    raw_status = data.get("health_status", "")
-    plant_state = (
-        "needs_attention"
-        if isinstance(raw_status, str) and raw_status.lower() == "needs_attention"
-        else "healthy"
-    )
-
-    # Strip placeholder items the model may have echoed back verbatim.
-    raw_tips = data.get("tips", [])
-    if isinstance(raw_tips, list):
-        tips = [t for t in raw_tips if isinstance(t, str) and t.strip() and not _is_placeholder(t)]
-    else:
-        tips = []
-    if not tips:
-        tips = ["Monitor plant regularly.", "Ensure adequate water and light.", "Check soil moisture weekly."]
-
-    diagnostic = _clean_str(data.get("diagnostic"), "")
-    leaf_condition = _clean_str(data.get("leaf_condition"), "")
-    env_assessment = _clean_str(data.get("environment_assessment"), "")
-
-    return {
-        "observations": [leaf_condition] if leaf_condition else [],
-        "plant_state": plant_state,
-        "diagnostic": diagnostic,
-        "tips": tips,
-        # Rich analysis fields stored in result for the UI
-        "analysis": {
-            "species": _clean_str(data.get("species"), "Unknown"),
-            "leaf_color": _clean_str(data.get("leaf_color"), ""),
-            "leaf_area": _clean_str(data.get("leaf_area"), ""),
-            "leaf_condition": leaf_condition,
-            "growth_stage": _clean_str(data.get("growth_stage"), ""),
-            "health_status": plant_state,
-            "disease_signs": _clean_str(data.get("disease_signs"), "None visible"),
-            "soil_observation": _clean_str(data.get("soil_observation"), "Not visible"),
-            "environment_assessment": env_assessment,
-        },
-    }
-
-
 # ---------------------------------------------------------------------------
 # Stub fallbacks
 # ---------------------------------------------------------------------------
