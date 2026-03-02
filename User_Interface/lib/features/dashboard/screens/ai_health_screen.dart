@@ -726,7 +726,9 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
 
             // Diagnostic
             if (diagnostic != null &&
-                diagnostic.isNotEmpty) ...[
+                diagnostic.isNotEmpty &&
+                !(diagnostic.startsWith('<') &&
+                    diagnostic.endsWith('>'))) ...[
               Text('Diagnostic',
                   style: theme.textTheme.titleLarge),
               const SizedBox(height: 8),
@@ -740,29 +742,44 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
               const SizedBox(height: 24),
             ],
 
-            // Care tips
-            if (tips != null && tips.isNotEmpty) ...[
-              Text('Care Tips',
-                  style: theme.textTheme.titleLarge),
-              const SizedBox(height: 8),
-              ...tips.asMap().entries.map((e) => Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        radius: 14,
-                        backgroundColor:
-                            theme.colorScheme.primaryContainer,
-                        child: Text('${e.key + 1}',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: theme.colorScheme
-                                    .onPrimaryContainer)),
-                      ),
-                      title: Text(e.value is String
-                          ? e.value as String
-                          : e.value.toString()),
-                    ),
-                  )),
+            // Care tips — filter out any unfilled placeholder items
+            if (tips != null) ...[
+              Builder(builder: (context) {
+                final visibleTips = tips
+                    .where((t) {
+                      final s = t?.toString() ?? '';
+                      return s.isNotEmpty &&
+                          !(s.startsWith('<') && s.endsWith('>'));
+                    })
+                    .toList();
+                if (visibleTips.isEmpty) return const SizedBox.shrink();
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('Care Tips',
+                        style: theme.textTheme.titleLarge),
+                    const SizedBox(height: 8),
+                    ...visibleTips.asMap().entries.map((e) => Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              radius: 14,
+                              backgroundColor:
+                                  theme.colorScheme.primaryContainer,
+                              child: Text('${e.key + 1}',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: theme.colorScheme
+                                          .onPrimaryContainer)),
+                            ),
+                            title: Text(e.value is String
+                                ? e.value as String
+                                : e.value.toString()),
+                          ),
+                        )),
+                  ],
+                );
+              }),
             ],
           ],
         ),
@@ -852,8 +869,26 @@ class _AnalysisGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    String s(dynamic v) =>
-        (v == null || v.toString().isEmpty) ? '—' : v.toString();
+    bool isPlaceholder(String str) =>
+        str.startsWith('<') && str.endsWith('>');
+
+    String s(dynamic v) {
+      if (v == null) return '—';
+      if (v is List) {
+        final parts = v
+            .where((e) =>
+                e != null &&
+                e.toString().isNotEmpty &&
+                !isPlaceholder(e.toString()))
+            .map((e) => e.toString())
+            .toList();
+        return parts.isEmpty ? '—' : parts.join(', ');
+      }
+      final str = v.toString().trim();
+      if (str.isEmpty || isPlaceholder(str)) return '—';
+      return str;
+    }
+
     final items = <_AnalysisItem>[
       _AnalysisItem(Icons.eco_outlined, 'Species',
           s(analysis['species'])),

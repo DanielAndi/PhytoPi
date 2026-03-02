@@ -16,6 +16,7 @@ Models (installed via pip):
     pip install moondream pillow requests supabase
 """
 import os
+import re
 import sys
 import time
 import json
@@ -127,6 +128,26 @@ def _build_prompt(sensor_context: str) -> str:
     )
 
 
+# Matches unfilled template placeholders the model may echo back verbatim, e.g. "<tip1>".
+_PLACEHOLDER_RE = re.compile(r'^\s*<[^>]+>\s*$')
+
+
+def _is_placeholder(v) -> bool:
+    return bool(_PLACEHOLDER_RE.match(str(v).strip()))
+
+
+def _clean_str(v, fallback: str = "") -> str:
+    """Return a clean string, turning lists into comma-joined text and
+    discarding any value that looks like an unfilled template placeholder."""
+    if v is None:
+        return fallback
+    if isinstance(v, list):
+        parts = [str(i).strip() for i in v if i and not _is_placeholder(str(i))]
+        return ", ".join(parts) if parts else fallback
+    s = str(v).strip()
+    return fallback if not s or _is_placeholder(s) else s
+
+
 def _fetch_sensor_readings(supabase, device_id: str) -> str:
     """
     Fetch the latest reading for each sensor type attached to this device.
@@ -197,25 +218,34 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
         data = {"diagnostic": text[:500], "health_status": "healthy"}
 
     plant_state = "needs_attention" if data.get("health_status", "").lower() == "needs_attention" else "healthy"
-    tips = data.get("tips", [])
-    if not isinstance(tips, list) or not tips:
+
+    # Strip placeholder items the model may have echoed back verbatim.
+    raw_tips = data.get("tips", [])
+    if isinstance(raw_tips, list):
+        tips = [t for t in raw_tips if isinstance(t, str) and t.strip() and not _is_placeholder(t)]
+    else:
+        tips = []
+    if not tips:
         tips = ["Monitor plant regularly.", "Ensure adequate water and light.", "Check soil moisture weekly."]
 
+    diagnostic = _clean_str(data.get("diagnostic"), "")
+    leaf_condition = _clean_str(data.get("leaf_condition"), "")
+
     return {
-        "observations": [data.get("leaf_condition", "")],
+        "observations": [leaf_condition] if leaf_condition else [],
         "plant_state": plant_state,
-        "diagnostic": data.get("diagnostic", ""),
+        "diagnostic": diagnostic,
         "tips": tips,
         # Rich analysis fields stored in result for the UI
         "analysis": {
-            "species": data.get("species", "Unknown"),
-            "leaf_color": data.get("leaf_color", ""),
-            "leaf_area": data.get("leaf_area", ""),
-            "leaf_condition": data.get("leaf_condition", ""),
-            "growth_stage": data.get("growth_stage", ""),
+            "species": _clean_str(data.get("species"), "Unknown"),
+            "leaf_color": _clean_str(data.get("leaf_color"), ""),
+            "leaf_area": _clean_str(data.get("leaf_area"), ""),
+            "leaf_condition": leaf_condition,
+            "growth_stage": _clean_str(data.get("growth_stage"), ""),
             "health_status": plant_state,
-            "disease_signs": data.get("disease_signs", "None visible"),
-            "soil_observation": data.get("soil_observation", "Not visible"),
+            "disease_signs": _clean_str(data.get("disease_signs"), "None visible"),
+            "soil_observation": _clean_str(data.get("soil_observation"), "Not visible"),
         },
     }
 
