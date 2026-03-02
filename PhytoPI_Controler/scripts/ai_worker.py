@@ -122,17 +122,54 @@ _LOREM_IPSUM_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Garbled / nonsense patterns: pure symbols, ?-runs, leading punctuation.
+_GARBLED_RE = re.compile(r'^[^a-zA-Z0-9]+$')
+
+
+def _is_garbled(text: str) -> bool:
+    """Return True if the response looks like garbage (?????, xtremely, !!! …)."""
+    if not text or not text.strip():
+        return True
+    t = text.strip()
+    # Pure non-alphanumeric (e.g. "?????")
+    if _GARBLED_RE.match(t):
+        return True
+    # Starts with a non-word character that suggests a stray prefix (e.g. "!!! Marijuana")
+    # We still allow it — the content after may be valid — so we don't flag here.
+    # Very short token that can't be a real word (single char that isn't a letter)
+    if len(t) == 1 and not t.isalpha():
+        return True
+    return False
+
+
+def _match_enum(text: str, choices: list, default: str) -> str:
+    """
+    Return the first allowed value found in *text* (case-insensitive).
+    Falls back to *default* if none match or *text* looks garbled.
+    """
+    if _is_garbled(text):
+        return default
+    t = text.lower()
+    for choice in choices:
+        if choice.lower() in t:
+            return choice
+    return default
+
 
 def _is_low_confidence_species(answer: str) -> bool:
     """Return True if moondream's species answer looks uncertain or garbled."""
+    if _is_garbled(answer):
+        return True
     text = answer.lower().strip()
-    if not text:
+    # Strip leading punctuation/symbols (e.g. "!!! Marijuana")
+    text_clean = re.sub(r'^[^a-z]+', '', text).strip()
+    if not text_clean:
         return True
     # Lorem ipsum hallucination
     if _LOREM_IPSUM_RE.search(text):
         return True
     # Vague single-word catch-alls
-    if text in {"unknown", "plant", "a plant", "flower", "tree", "shrub", "herb"}:
+    if text_clean in {"unknown", "plant", "a plant", "flower", "tree", "shrub", "herb"}:
         return True
     # Rambling sentence = model is guessing
     if len(text.split()) > 8:
@@ -205,28 +242,70 @@ def _fetch_image_bytes(supabase, storage_path: str):
 _TIP_RE = re.compile(r'^\s*\d+[\.\)]\s*(.+)', re.MULTILINE)
 
 
-def _query(image_bytes: bytes, question: str) -> str:
-    """Send the image with a single focused question; return the model's answer."""
+def _query(image_bytes: bytes, question: str, temperature: float = 0.15) -> str:
+    """Send the image with a single focused question; return the model's answer.
+
+    A low temperature (default 0.15) greatly reduces random hallucinations on
+    structured / enum-type questions.  Use a higher value (0.4-0.6) for free-text
+    descriptions where some creativity is acceptable.
+    """
     response = _ollama.chat(
         model=OLLAMA_MODEL,
         messages=[{"role": "user", "content": question, "images": [image_bytes]}],
+        options={"temperature": temperature},
     )
     return response["message"]["content"].strip()
+
+
+# ---------------------------------------------------------------------------
+# Retry prompt variants — used when the first attempt returns garbled output.
+# Asking the same question again usually produces the same bad answer.
+# ---------------------------------------------------------------------------
+_RETRY_PROMPTS = {
+    "health_status": (
+        "Look at this plant image carefully. "
+        "Type ONLY the single word 'healthy' if the plant looks vigorous and undamaged, "
+        "or ONLY the single word 'needs_attention' if you see wilting, yellowing, spots, "
+        "or other stress signs. Do not write anything else."
+    ),
+    "leaf_area": (
+        "How much of the plant is covered in leaves? "
+        "Answer with ONLY one of these exact words (nothing else): sparse  moderate  dense"
+    ),
+    "growth_stage": (
+        "What stage of growth is this plant in? "
+        "Answer with ONLY one of these exact words (nothing else): "
+        "seedling  vegetative  flowering  fruiting  mature"
+    ),
+    "disease_signs": (
+        "Do you see any disease, pest damage, yellowing, spots, mould, or rot on this plant? "
+        "If yes, describe it in one short sentence. If no problems are visible, reply exactly: None"
+    ),
+    "soil_observation": (
+        "Is the soil visible in this image? "
+        "If yes, describe its appearance in one sentence. "
+        "If the soil is not visible, reply exactly: Not visible"
+    ),
+}
 
 
 def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
     sensors = sensor_context if sensor_context else "No sensor data available."
 
-    def q(label: str, question: str, default: str = "") -> str:
-        """Query moondream; retry once on empty response, then fall back to default."""
+    def q(label: str, question: str, default: str = "",
+          temperature: float = 0.15, retry_question: str = "") -> str:
+        """Query moondream; retry once with an alternate prompt on failure/garbage."""
         for attempt in range(2):
+            prompt = question if attempt == 0 else (retry_question or question)
             suffix = " (retry)" if attempt else ""
             print(f"  -> Querying: {label}{suffix}")
             try:
-                answer = _query(image_bytes, question)
-                if answer:
+                answer = _query(image_bytes, prompt, temperature=temperature)
+                if answer and not _is_garbled(answer):
                     print(f"     <- {answer[:120]}")
                     return answer
+                if answer:
+                    print(f"     <- garbled response ({answer[:40]!r}), retrying ...")
             except Exception as e:
                 print(f"     Query error ({label}): {e}", file=sys.stderr)
                 break
@@ -239,12 +318,13 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
     species_raw = q(
         "species",
         "What type of plant is shown in this image? "
-        "Reply with only the common plant name (one to three words, e.g. tomato, snake plant, peace lily).",
+        "Reply with only the common plant name, one to three words "
+        "(examples: tomato, snake plant, peace lily, basil). "
+        "Do not add any explanation.",
+        temperature=0.1,
     )
 
     # --- Hybrid species identification ---
-    # If moondream looks uncertain AND a PlantNet key is configured, ask the
-    # purpose-built plant taxonomy API as a second opinion.
     species_source = "moondream"
     species_confidence = None
 
@@ -257,7 +337,8 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
             species_confidence = round(plantnet_score, 3)
             print(f"     <- PlantNet: {species} (score {plantnet_score:.1%})")
         else:
-            species = species_raw or "Unknown"
+            # Strip leading punctuation from moondream answer (e.g. "!!! Basil" -> "Basil")
+            species = re.sub(r'^[^a-zA-Z]+', '', species_raw).strip() or "Unknown"
             if plantnet_name:
                 print(
                     f"     PlantNet score too low ({plantnet_score:.1%} < "
@@ -266,76 +347,104 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
             else:
                 print("     PlantNet returned no result, keeping moondream answer")
     else:
-        species = species_raw or "Unknown"
+        species = re.sub(r'^[^a-zA-Z]+', '', species_raw).strip() or "Unknown"
 
     health_raw = q(
         "health_status",
-        "Is this plant healthy or showing signs of disease or stress? "
-        "Reply with only the word 'healthy' or 'needs_attention'.",
+        "Is this plant healthy, or does it show stress, disease, or damage? "
+        "Reply with ONLY one of these two words: healthy  needs_attention",
         default="healthy",
+        temperature=0.1,
+        retry_question=_RETRY_PROMPTS["health_status"],
     )
-    plant_state = (
-        "needs_attention" if "needs_attention" in health_raw.lower() else "healthy"
+    plant_state = _match_enum(
+        health_raw,
+        ["needs_attention", "healthy"],
+        default="healthy",
     )
 
     leaf_color = q(
         "leaf_color",
-        "What are the primary and secondary leaf colors of this plant?",
+        "What is the primary leaf color of this plant? "
+        "Answer in one short sentence (e.g. 'The leaves are dark green with yellow edges.').",
+        temperature=0.3,
     )
 
-    leaf_area = q(
+    leaf_area_raw = q(
         "leaf_area",
         "How dense is the leaf coverage of this plant? "
-        "Reply with only one word: sparse, moderate, or dense.",
+        "Reply with ONLY one of these exact words: sparse  moderate  dense",
+        default="moderate",
+        temperature=0.1,
+        retry_question=_RETRY_PROMPTS["leaf_area"],
+    )
+    leaf_area = _match_enum(
+        leaf_area_raw,
+        ["sparse", "moderate", "dense"],
         default="moderate",
     )
 
     leaf_condition = q(
         "leaf_condition",
-        "Describe the condition of the leaves: include texture, shape, "
-        "any spots, curling, or necrosis.",
+        "Describe the condition of the leaves in one or two sentences: "
+        "include color, texture, shape, and any spots, curling, or damage you can see.",
+        temperature=0.35,
     )
 
-    growth_stage = q(
+    growth_stage_raw = q(
         "growth_stage",
         "What growth stage is this plant in? "
-        "Reply with only one word: seedling, vegetative, flowering, fruiting, or mature.",
+        "Reply with ONLY one of these exact words: seedling  vegetative  flowering  fruiting  mature",
+        default="vegetative",
+        temperature=0.1,
+        retry_question=_RETRY_PROMPTS["growth_stage"],
+    )
+    growth_stage = _match_enum(
+        growth_stage_raw,
+        ["seedling", "vegetative", "flowering", "fruiting", "mature"],
         default="vegetative",
     )
 
     disease_signs = q(
         "disease_signs",
-        "Are there any visible diseases, pests, or discoloration on this plant? "
-        "Describe them briefly, or reply 'None' if there are none.",
+        "Are there any visible diseases, pests, discoloration, spots, wilting, or rot on this plant? "
+        "Describe briefly in one sentence, or reply exactly 'None' if everything looks healthy.",
         default="None",
+        temperature=0.2,
+        retry_question=_RETRY_PROMPTS["disease_signs"],
     )
 
     soil_obs = q(
         "soil_observation",
-        "What can you observe about the soil moisture or roots in this image? "
-        "Reply 'Not visible' if the soil is not visible.",
+        "Is the soil visible in this image? If yes, describe its colour and moisture appearance. "
+        "If the soil is not visible, reply exactly 'Not visible'.",
         default="Not visible",
+        temperature=0.2,
+        retry_question=_RETRY_PROMPTS["soil_observation"],
     )
 
     env_assessment = q(
         "environment_assessment",
-        f"The plant's grow-environment sensor readings are:\n{sensors}\n\n"
-        "In one sentence, explain how these conditions support or stress this plant.",
+        f"Sensor readings for this plant's environment:\n{sensors}\n\n"
+        "In one sentence, explain how these sensor conditions help or stress this plant.",
+        temperature=0.35,
     )
 
     diagnostic = q(
         "diagnostic",
-        f"The plant's grow-environment sensor readings are:\n{sensors}\n\n"
+        f"Sensor readings for this plant's environment:\n{sensors}\n\n"
         "In two sentences, summarise this plant's overall health based on what you "
-        "see in the image and the sensor data.",
+        "see in the image and the sensor readings above.",
+        temperature=0.35,
     )
 
     tips_raw = q(
         "tips",
-        f"The plant's grow-environment sensor readings are:\n{sensors}\n\n"
-        "Give three specific, actionable care tips for this plant based on what you "
-        "see in the image and the sensor data. "
-        "Format your answer as a numbered list:\n1. ...\n2. ...\n3. ...",
+        f"Sensor readings for this plant's environment:\n{sensors}\n\n"
+        "Give exactly three specific, actionable care tips for this plant. "
+        "Base them on what you see in the image and the sensor readings. "
+        "Format as a numbered list — nothing before or after:\n1. ...\n2. ...\n3. ...",
+        temperature=0.4,
     )
     tips = _TIP_RE.findall(tips_raw)
     if not tips and tips_raw:
