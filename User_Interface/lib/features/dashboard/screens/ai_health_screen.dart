@@ -27,6 +27,7 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
   String _streamUrl = '';
   Timer? _refreshTimer;
   String? _currentDeviceId;
+  final Map<String, Future<String>> _signedUrlFutureCache = {};
 
   @override
   void initState() {
@@ -82,6 +83,7 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
         _inProgressJob = null;
         _latestInference = null;
         _historyJobs = [];
+        _signedUrlFutureCache.clear();
       });
       return;
     }
@@ -135,15 +137,34 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
         final latestInference = (inferences as List).isNotEmpty
             ? inferences.first as Map<String, dynamic>
             : _inferenceFromJob(latestCompleted);
+        final nextInProgress =
+            (pendingJobs as List).isNotEmpty ? pendingJobs.first : null;
+        final nextHistory = List<Map<String, dynamic>>.from(
+          (historyJobs as List).map((e) => Map<String, dynamic>.from(e as Map)),
+        );
+
+        final latestUnchanged = _latestCompletedJob?['id'] == latestCompleted?['id'];
+        final inProgressUnchanged = _inProgressJob?['id'] == nextInProgress?['id'] &&
+            _inProgressJob?['status'] == nextInProgress?['status'];
+        final inferenceUnchanged = _latestInference?['id'] == latestInference?['id'] &&
+            _latestInference?['job_id'] == latestInference?['job_id'];
+        final historyUnchanged = _historyJobs.length == nextHistory.length &&
+            (_historyJobs.isEmpty || _historyJobs.first['id'] == nextHistory.first['id']);
+
+        if (silent &&
+            latestUnchanged &&
+            inProgressUnchanged &&
+            inferenceUnchanged &&
+            historyUnchanged &&
+            _error == null) {
+          return;
+        }
 
         setState(() {
           _latestCompletedJob = latestCompleted;
-          _inProgressJob =
-              (pendingJobs as List).isNotEmpty ? pendingJobs.first : null;
+          _inProgressJob = nextInProgress;
           _latestInference = latestInference;
-          _historyJobs = List<Map<String, dynamic>>.from(
-            (historyJobs as List).map((e) => Map<String, dynamic>.from(e as Map)),
-          );
+          _historyJobs = nextHistory;
           _loading = false;
           _error = null;
         });
@@ -271,7 +292,7 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
                                     const SizedBox(height: 10),
                                     if (imagePath != null && imagePath.isNotEmpty)
                                       FutureBuilder<String>(
-                                        future: _getImageUrl(imagePath),
+                                        future: _getImageUrlCached(imagePath),
                                         builder: (context, snap) {
                                           if (!snap.hasData || snap.data!.isEmpty) {
                                             return _placeholderImage(theme);
@@ -281,7 +302,7 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
                                             child: Image.network(
                                               snap.data!,
                                               height: 180,
-                                              fit: BoxFit.cover,
+                                              fit: BoxFit.contain,
                                               errorBuilder: (_, __, ___) =>
                                                   _placeholderImage(theme),
                                             ),
@@ -395,24 +416,26 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Header
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Text('AI Plant Health', style: theme.textTheme.headlineSmall),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
               children: [
-                Text('AI Plant Health', style: theme.textTheme.headlineSmall),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _showHistorySheet,
-                      icon: const Icon(Icons.history),
-                      label: const Text('View History'),
-                    ),
-                    FilledButton.icon(
-                      onPressed: _triggerCapture,
-                      icon: const Icon(Icons.camera_alt),
-                      label: const Text('Capture Now'),
-                    ),
-                  ],
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    await _load(silent: true);
+                    if (!mounted) return;
+                    _showHistorySheet();
+                  },
+                  icon: const Icon(Icons.history),
+                  label: const Text('View History'),
+                ),
+                FilledButton.icon(
+                  onPressed: _triggerCapture,
+                  icon: const Icon(Icons.camera_alt),
+                  label: const Text('Capture Now'),
                 ),
               ],
             ),
@@ -502,7 +525,7 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
 
             if (imageUrl != null) ...[
               FutureBuilder<String>(
-                future: _getImageUrl(imageUrl),
+                future: _getImageUrlCached(imageUrl),
                 builder: (context, snap) {
                   if (snap.hasData && snap.data!.isNotEmpty) {
                     return ClipRRect(
@@ -511,7 +534,7 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
                         snap.data!,
                         height: 280,
                         width: double.infinity,
-                        fit: BoxFit.cover,
+                        fit: BoxFit.contain,
                         errorBuilder: (_, __, ___) => _placeholderImage(theme),
                       ),
                     );
@@ -620,7 +643,16 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
     );
   }
 
-  Future<String> _getImageUrl(String path) async {
+  Future<String> _getImageUrlCached(String path) {
+    final cachedFuture = _signedUrlFutureCache[path];
+    if (cachedFuture != null) return cachedFuture;
+
+    final future = _createSignedImageUrl(path);
+    _signedUrlFutureCache[path] = future;
+    return future;
+  }
+
+  Future<String> _createSignedImageUrl(String path) async {
     try {
       // device-images is a private bucket — use a signed URL (valid 1 hour)
       final url = await SupabaseConfig.client!.storage

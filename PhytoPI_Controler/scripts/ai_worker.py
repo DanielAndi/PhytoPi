@@ -22,6 +22,8 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 
+PROCESSING_TIMEOUT_SECONDS = int(os.environ.get("AI_JOB_PROCESSING_TIMEOUT_SECONDS", "300"))
+
 # ---------------------------------------------------------------------------
 # Load .env from the same directory as this script (or the working directory)
 # ---------------------------------------------------------------------------
@@ -73,6 +75,15 @@ except ImportError:
     print("  Install: pip install ollama && ollama pull llava-phi3", file=sys.stderr)
 
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llava-phi3")
+
+
+def _parse_iso_ts(value):
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +259,27 @@ def main():
         try:
             rows = supabase.table("ai_capture_jobs").select("*").eq("status", "pending").limit(1).execute()
             if not rows.data:
+                # Recover stale jobs that got stuck in processing due crash/network issues.
+                processing_rows = supabase.table("ai_capture_jobs").select("*").eq(
+                    "status", "processing"
+                ).order("created_at", ascending=True).limit(1).execute()
+                if processing_rows.data:
+                    processing_job = processing_rows.data[0]
+                    created_at = _parse_iso_ts(processing_job.get("created_at"))
+                    if created_at:
+                        age_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
+                        if age_seconds > PROCESSING_TIMEOUT_SECONDS:
+                            stale_id = processing_job["id"]
+                            print(
+                                f"[{datetime.now().strftime('%H:%M:%S')}] "
+                                f"Re-queuing stale processing job {stale_id} "
+                                f"(age {int(age_seconds)}s)"
+                            )
+                            supabase.table("ai_capture_jobs").update({"status": "pending"}).eq(
+                                "id", stale_id
+                            ).execute()
+                            time.sleep(1)
+                            continue
                 time.sleep(10)
                 continue
 
