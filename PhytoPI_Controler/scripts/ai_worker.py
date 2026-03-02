@@ -18,8 +18,6 @@ Models (installed via pip):
 import os
 import sys
 import time
-import io
-import requests
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -58,49 +56,31 @@ except ImportError:
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# Moondream2 via HuggingFace Transformers (local CPU/GPU inference)
-# Install: pip install "transformers>=4.51.1" "torch>=2.7.0" "accelerate>=1.10.0" "Pillow>=11.0.0"
-# CPU-only torch (smaller download): pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Vision inference via Ollama (llava-phi3)
+# Ollama uses llama.cpp - works on old CPUs (Sandy Bridge, no AVX2 required)
+# Install: curl -fsSL https://ollama.com/install.sh | sh
+#          ollama pull llava-phi3
+#          pip install ollama Pillow
 # ---------------------------------------------------------------------------
 try:
-    import torch
-    from transformers import AutoModelForCausalLM
+    import ollama as _ollama
     from PIL import Image
-    _model = None  # loaded lazily on first use
-
-    def _get_model():
-        global _model
-        if _model is None:
-            print("Loading Moondream2 from HuggingFace (first run downloads ~2 GB, please wait)...", file=sys.stderr)
-            # Use all available CPU cores for faster inference
-            torch.set_num_threads(os.cpu_count() or 4)
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            # torch_dtype is handled by transformers before the model __init__ receives kwargs
-            torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-            _model = AutoModelForCausalLM.from_pretrained(
-                "vikhyatk/moondream2",
-                revision="2024-08-26",
-                trust_remote_code=True,
-                torch_dtype=torch_dtype,
-            ).to(device)
-            print(f"Moondream2 loaded on {device} ({torch.get_num_threads()} threads).", file=sys.stderr)
-        return _model
-
-    HAS_MOONDREAM = True
+    HAS_OLLAMA = True
 except ImportError:
-    HAS_MOONDREAM = False
-    print("Warning: transformers/torch not installed. Using placeholder results.", file=sys.stderr)
-    print("  Install: pip install 'transformers>=4.51.1' 'torch>=2.7.0' 'accelerate>=1.10.0' Pillow", file=sys.stderr)
+    HAS_OLLAMA = False
+    print("Warning: ollama not installed. Using placeholder results.", file=sys.stderr)
+    print("  Install: pip install ollama && ollama pull llava-phi3", file=sys.stderr)
+
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llava-phi3")
 
 
 # ---------------------------------------------------------------------------
 # Image fetching
 # ---------------------------------------------------------------------------
-def _fetch_image(supabase, storage_path: str):
-    """Download image from Supabase Storage into a PIL Image object."""
+def _fetch_image_bytes(supabase, storage_path: str):
+    """Download image bytes from Supabase Storage."""
     try:
-        response = supabase.storage.from_("device-images").download(storage_path)
-        return Image.open(io.BytesIO(response))
+        return supabase.storage.from_("device-images").download(storage_path)
     except Exception as e:
         print(f"Could not fetch image from storage ({storage_path}): {e}", file=sys.stderr)
         return None
@@ -109,44 +89,55 @@ def _fetch_image(supabase, storage_path: str):
 # ---------------------------------------------------------------------------
 # Real inference with Moondream
 # ---------------------------------------------------------------------------
-def _run_moondream(image) -> dict:
-    model = _get_model()
-    # Encode once and reuse for all queries — encoding is the most expensive step
-    encoded = model.encode_image(image)
-
-    # Query 1: combined health observation + state (1 call instead of 3)
+def _run_ollama(image_bytes: bytes) -> dict:
+    prompt = (
+        "You are a plant health expert. Analyze the plant in this image.\n"
+        "Respond in exactly this format:\n"
+        "STATUS: healthy OR needs_attention\n"
+        "OBSERVATION: <one sentence describing the plant's appearance>\n"
+        "DIAGNOSTIC: <2 sentences on plant health>\n"
+        "TIPS:\n- <tip 1>\n- <tip 2>\n- <tip 3>\n"
+    )
     try:
-        obs_raw = model.query(
-            encoded,
-            "Describe this plant's health. Note any disease, pests, discoloration, wilting, or damage. "
-            "End your response with either 'STATUS: healthy' or 'STATUS: needs_attention'."
-        )["answer"].strip()
+        response = _ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=[{
+                "role": "user",
+                "content": prompt,
+                "images": [image_bytes],
+            }]
+        )
+        text = response["message"]["content"].strip()
     except Exception as e:
-        obs_raw = f"Plant observed. STATUS: healthy"
+        print(f"Ollama inference error: {e}", file=sys.stderr)
+        return _stub_result(None)
 
-    plant_state = "needs_attention" if "needs_attention" in obs_raw.lower() else "healthy"
-    # Strip the status tag from the observation text
-    observation = obs_raw.replace("STATUS: needs_attention", "").replace("STATUS: healthy", "").strip()
+    # Parse the structured response
+    lines = text.splitlines()
+    plant_state = "healthy"
+    observation = ""
+    diagnostic = ""
+    tips = []
+    in_tips = False
 
-    # Query 2: diagnostic + tips in one call (1 call instead of 2)
-    try:
-        combined_raw = model.query(
-            encoded,
-            "Give a 2-sentence plant health diagnostic followed by 3 short care tips. "
-            "Format: DIAGNOSTIC: <text> TIPS: - tip1 - tip2 - tip3"
-        )["answer"].strip()
-        # Parse diagnostic
-        if "TIPS:" in combined_raw:
-            diag_part, tips_part = combined_raw.split("TIPS:", 1)
-            diagnostic = diag_part.replace("DIAGNOSTIC:", "").strip()
-            tips = [t.lstrip("- ").strip() for t in tips_part.strip().splitlines() if t.strip()]
-        else:
-            diagnostic = combined_raw
-            tips = []
-        if not tips:
-            tips = ["Monitor plant regularly.", "Ensure adequate water and light.", "Check soil moisture weekly."]
-    except Exception:
+    for line in lines:
+        line = line.strip()
+        if line.upper().startswith("STATUS:"):
+            plant_state = "needs_attention" if "needs_attention" in line.lower() else "healthy"
+        elif line.upper().startswith("OBSERVATION:"):
+            observation = line.split(":", 1)[1].strip()
+        elif line.upper().startswith("DIAGNOSTIC:"):
+            diagnostic = line.split(":", 1)[1].strip()
+        elif line.upper().startswith("TIPS:"):
+            in_tips = True
+        elif in_tips and line.startswith("-"):
+            tips.append(line.lstrip("- ").strip())
+
+    if not observation:
+        observation = text[:200]
+    if not diagnostic:
         diagnostic = observation
+    if not tips:
         tips = ["Monitor plant regularly.", "Ensure adequate water and light.", "Check soil moisture weekly."]
 
     return {
@@ -160,7 +151,7 @@ def _run_moondream(image) -> dict:
 # ---------------------------------------------------------------------------
 # Stub fallbacks
 # ---------------------------------------------------------------------------
-def _stub_result(_image) -> dict:
+def _stub_result(_image_bytes) -> dict:
     return {
         "observations": ["Plant visible", "Leaves present"],
         "plant_state": "healthy",
@@ -183,7 +174,7 @@ def main():
         print("Error: Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env or environment.", file=sys.stderr)
         sys.exit(1)
 
-    model_version = "moondream-2b-int8" if HAS_MOONDREAM else "stub"
+    model_version = f"ollama/{OLLAMA_MODEL}" if HAS_OLLAMA else "stub"
     print(f"AI Worker starting. Model: {model_version}")
     print(f"Polling for pending jobs every 10s ...")
 
@@ -206,12 +197,12 @@ def main():
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Processing job {job_id} (image: {image_storage_path})")
             supabase.table("ai_capture_jobs").update({"status": "processing"}).eq("id", job_id).execute()
 
-            image = _fetch_image(supabase, image_storage_path) if image_storage_path else None
+            image_bytes = _fetch_image_bytes(supabase, image_storage_path) if image_storage_path else None
 
-            if HAS_MOONDREAM and image:
-                result = _run_moondream(image)
+            if HAS_OLLAMA and image_bytes:
+                result = _run_ollama(image_bytes)
             else:
-                result = _stub_result(image)
+                result = _stub_result(image_bytes)
 
             vision_result = {
                 "observations": result["observations"],
@@ -235,7 +226,7 @@ def main():
                 "diagnostic": result["diagnostic"],
                 "tips": result["tips"],
                 "image_url": image_storage_path,
-                "model_version": model_version,
+                "model_version": model_version[:100],
                 "job_id": job_id,
             }).execute()
 

@@ -1,13 +1,9 @@
 # PhytoPi AI Worker dependencies
 # Install: pip install -r requirements.txt
-# For CPU-only PyTorch: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#
+# Vision inference uses Ollama (works on old CPUs - no AVX2 required):
+#   curl -fsSL https://ollama.com/install.sh | sh
+#   ollama pull llava-phi3
 
 supabase
-Pillow>=11.0.0
-torch
-torchvision
-einops
-accelerate>=1.10.0
-
-# Pinned to 4.44.x - moondream2 (2024-08-26 revision) is incompatible with transformers 5.x
-transformers==4.44.2
+ollama
