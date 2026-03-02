@@ -116,11 +116,20 @@ _LOW_CONFIDENCE_SIGNALS = frozenset([
     "i don't know", "i do not know",
 ])
 
+# Moondream occasionally hallucinates lorem ipsum filler text.
+_LOREM_IPSUM_RE = re.compile(
+    r'\b(lorem|ipsum|dolor|sit\s+amet|consectetur|adipiscing|elit)\b',
+    re.IGNORECASE,
+)
+
 
 def _is_low_confidence_species(answer: str) -> bool:
-    """Return True if moondream's species answer looks uncertain."""
+    """Return True if moondream's species answer looks uncertain or garbled."""
     text = answer.lower().strip()
     if not text:
+        return True
+    # Lorem ipsum hallucination
+    if _LOREM_IPSUM_RE.search(text):
         return True
     # Vague single-word catch-alls
     if text in {"unknown", "plant", "a plant", "flower", "tree", "shrub", "herb"}:
@@ -208,15 +217,24 @@ def _query(image_bytes: bytes, question: str) -> str:
 def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
     sensors = sensor_context if sensor_context else "No sensor data available."
 
-    def q(label: str, question: str) -> str:
-        print(f"  -> Querying: {label}")
-        try:
-            answer = _query(image_bytes, question)
-            print(f"     <- {answer[:120]}")
-            return answer
-        except Exception as e:
-            print(f"     Query error ({label}): {e}", file=sys.stderr)
-            return ""
+    def q(label: str, question: str, default: str = "") -> str:
+        """Query moondream; retry once on empty response, then fall back to default."""
+        for attempt in range(2):
+            suffix = " (retry)" if attempt else ""
+            print(f"  -> Querying: {label}{suffix}")
+            try:
+                answer = _query(image_bytes, question)
+                if answer:
+                    print(f"     <- {answer[:120]}")
+                    return answer
+            except Exception as e:
+                print(f"     Query error ({label}): {e}", file=sys.stderr)
+                break
+            if attempt == 0:
+                time.sleep(1)
+        if default:
+            print(f"     <- (no response, using default: {default!r})")
+        return default
 
     species_raw = q(
         "species",
@@ -254,6 +272,7 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
         "health_status",
         "Is this plant healthy or showing signs of disease or stress? "
         "Reply with only the word 'healthy' or 'needs_attention'.",
+        default="healthy",
     )
     plant_state = (
         "needs_attention" if "needs_attention" in health_raw.lower() else "healthy"
@@ -268,6 +287,7 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
         "leaf_area",
         "How dense is the leaf coverage of this plant? "
         "Reply with only one word: sparse, moderate, or dense.",
+        default="moderate",
     )
 
     leaf_condition = q(
@@ -280,18 +300,21 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
         "growth_stage",
         "What growth stage is this plant in? "
         "Reply with only one word: seedling, vegetative, flowering, fruiting, or mature.",
+        default="vegetative",
     )
 
     disease_signs = q(
         "disease_signs",
         "Are there any visible diseases, pests, or discoloration on this plant? "
         "Describe them briefly, or reply 'None' if there are none.",
+        default="None",
     )
 
     soil_obs = q(
         "soil_observation",
         "What can you observe about the soil moisture or roots in this image? "
         "Reply 'Not visible' if the soil is not visible.",
+        default="Not visible",
     )
 
     env_assessment = q(
