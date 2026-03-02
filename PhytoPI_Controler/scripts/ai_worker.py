@@ -262,7 +262,7 @@ def main():
                 # Recover stale jobs that got stuck in processing due crash/network issues.
                 processing_rows = supabase.table("ai_capture_jobs").select("*").eq(
                     "status", "processing"
-                ).order("created_at", ascending=True).limit(1).execute()
+                ).order("created_at", desc=False).limit(1).execute()
                 if processing_rows.data:
                     processing_job = processing_rows.data[0]
                     created_at = _parse_iso_ts(processing_job.get("created_at"))
