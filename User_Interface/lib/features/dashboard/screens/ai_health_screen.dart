@@ -163,6 +163,14 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
     final tips = inference?['tips'] as List?;
     final imageUrl = job?['image_url'] as String?;
     final status = job?['status'] as String?;
+    final resultMap = inference?['result'] as Map<String, dynamic>?;
+    final analysis = resultMap?['llm']?['analysis'] as Map<String, dynamic>?;
+    final sensorSnapshot = resultMap?['sensor_snapshot'] as String?;
+    final envAssessment = analysis?['environment_assessment'] as String?;
+    final healthStatus = analysis?['health_status'] as String? ??
+        (inference?['result'] as Map<String, dynamic>?)?['vision']
+            ?['plant_state'] as String?;
+    final isHealthy = healthStatus != 'needs_attention';
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -172,6 +180,7 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Header
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -184,11 +193,18 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
               ],
             ),
             const SizedBox(height: 24),
-            // Livestream section
+
+            // Health status banner (shown when analysis available)
+            if (analysis != null) ...[
+              _HealthStatusBanner(isHealthy: isHealthy, theme: theme),
+              const SizedBox(height: 24),
+            ],
+
+            // Live stream
             Text('Live View', style: theme.textTheme.titleLarge),
             const SizedBox(height: 8),
             Container(
-              height: 280,
+              height: 260,
               decoration: BoxDecoration(
                 color: Colors.black,
                 borderRadius: BorderRadius.circular(12),
@@ -208,9 +224,10 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.videocam_off, size: 48, color: Colors.white70),
+                            const Icon(Icons.videocam_off, size: 48, color: Colors.white70),
                             const SizedBox(height: 8),
-                            Text('Stream disconnected', style: TextStyle(color: Colors.white70)),
+                            const Text('Stream disconnected',
+                                style: TextStyle(color: Colors.white70)),
                             const SizedBox(height: 16),
                             FilledButton.icon(
                               onPressed: _retryStream,
@@ -227,29 +244,36 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
                     child: TextButton.icon(
                       onPressed: _retryStream,
                       icon: const Icon(Icons.refresh, size: 18, color: Colors.white70),
-                      label: Text('Retry', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      label: const Text('Retry',
+                          style: TextStyle(color: Colors.white70, fontSize: 12)),
                     ),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 24),
+
+            // Captured image
             Text('AI Capture', style: theme.textTheme.titleLarge),
             const SizedBox(height: 8),
             if (imageUrl != null && status == 'completed') ...[
               FutureBuilder<String>(
                 future: _getImageUrl(imageUrl),
                 builder: (context, snap) {
-                  if (snap.hasData) {
+                  if (snap.hasData && snap.data!.isNotEmpty) {
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(12),
                       child: Image.network(
                         snap.data!,
-                        height: 300,
+                        height: 280,
+                        width: double.infinity,
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => _placeholderImage(theme),
                       ),
                     );
+                  }
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return _placeholderImage(theme);
                   }
                   return _placeholderImage(theme);
                 },
@@ -262,10 +286,9 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
                   child: Row(
                     children: [
                       const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2)),
                       const SizedBox(width: 16),
                       Text('Processing... ($status)'),
                     ],
@@ -280,38 +303,78 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
                     children: [
                       Icon(Icons.photo_camera, size: 48, color: theme.disabledColor),
                       const SizedBox(height: 16),
-                      Text(
-                        'No captures yet',
-                        style: theme.textTheme.titleMedium,
-                      ),
+                      Text('No captures yet', style: theme.textTheme.titleMedium),
                       const SizedBox(height: 8),
                       const Text('Tap "Capture Now" to take a plant photo for AI analysis.'),
                     ],
                   ),
                 ),
               ),
-            if (diagnostic != null && diagnostic.isNotEmpty) ...[
+
+            // Rich analysis grid
+            if (analysis != null) ...[
+              Text('Plant Analysis', style: theme.textTheme.titleLarge),
+              const SizedBox(height: 8),
+              _AnalysisGrid(analysis: analysis, theme: theme),
               const SizedBox(height: 24),
+            ],
+
+            // Environment assessment (sensor cross-check)
+            if (envAssessment != null && envAssessment.isNotEmpty) ...[
+              Text('Environment Assessment', style: theme.textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Card(
+                child: ListTile(
+                  leading: Icon(Icons.sensors, color: theme.colorScheme.primary),
+                  title: Text(envAssessment, style: theme.textTheme.bodyMedium),
+                  subtitle: sensorSnapshot != null && sensorSnapshot.isNotEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            sensorSnapshot,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontFamily: 'monospace',
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        )
+                      : null,
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+
+            // Diagnostic
+            if (diagnostic != null && diagnostic.isNotEmpty) ...[
               Text('Diagnostic', style: theme.textTheme.titleLarge),
               const SizedBox(height: 8),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Text(diagnostic),
+                  child: Text(diagnostic, style: theme.textTheme.bodyMedium),
                 ),
               ),
-            ],
-            if (tips != null && tips.isNotEmpty) ...[
               const SizedBox(height: 24),
-              Text('Tips', style: theme.textTheme.titleLarge),
+            ],
+
+            // Care tips
+            if (tips != null && tips.isNotEmpty) ...[
+              Text('Care Tips', style: theme.textTheme.titleLarge),
               const SizedBox(height: 8),
-              ...tips.map((t) => Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  leading: const Icon(Icons.lightbulb_outline),
-                  title: Text(t is String ? t : t.toString()),
-                ),
-              )),
+              ...tips.asMap().entries.map((e) => Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        radius: 14,
+                        backgroundColor: theme.colorScheme.primaryContainer,
+                        child: Text('${e.key + 1}',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: theme.colorScheme.onPrimaryContainer)),
+                      ),
+                      title: Text(e.value is String ? e.value : e.value.toString()),
+                    ),
+                  )),
             ],
           ],
         ),
@@ -321,7 +384,7 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
 
   Widget _placeholderImage(ThemeData theme) {
     return Container(
-      height: 300,
+      height: 280,
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
@@ -343,4 +406,82 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
       return '';
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Health status banner
+// ---------------------------------------------------------------------------
+class _HealthStatusBanner extends StatelessWidget {
+  const _HealthStatusBanner({required this.isHealthy, required this.theme});
+  final bool isHealthy;
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isHealthy ? Colors.green.shade700 : Colors.orange.shade700;
+    final bg = isHealthy ? Colors.green.shade50 : Colors.orange.shade50;
+    final icon = isHealthy ? Icons.check_circle_outline : Icons.warning_amber_outlined;
+    final label = isHealthy ? 'Plant is Healthy' : 'Needs Attention';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.4)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(width: 12),
+          Text(label,
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(color: color, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Analysis grid — displays species, leaf data, growth stage, disease signs
+// ---------------------------------------------------------------------------
+class _AnalysisGrid extends StatelessWidget {
+  const _AnalysisGrid({required this.analysis, required this.theme});
+  final Map<String, dynamic> analysis;
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <_AnalysisItem>[
+      _AnalysisItem(Icons.eco_outlined, 'Species', analysis['species'] ?? '—'),
+      _AnalysisItem(Icons.palette_outlined, 'Leaf Colour', analysis['leaf_color'] ?? '—'),
+      _AnalysisItem(Icons.crop_free_outlined, 'Leaf Area', analysis['leaf_area'] ?? '—'),
+      _AnalysisItem(Icons.texture_outlined, 'Leaf Condition', analysis['leaf_condition'] ?? '—'),
+      _AnalysisItem(Icons.timeline_outlined, 'Growth Stage', analysis['growth_stage'] ?? '—'),
+      _AnalysisItem(Icons.bug_report_outlined, 'Disease / Pests', analysis['disease_signs'] ?? '—'),
+      _AnalysisItem(Icons.water_drop_outlined, 'Soil', analysis['soil_observation'] ?? '—'),
+    ].where((i) => i.value.isNotEmpty && i.value != '—').toList();
+
+    return Column(
+      children: items
+          .map((item) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  leading: Icon(item.icon, color: theme.colorScheme.primary),
+                  title: Text(item.label,
+                      style: theme.textTheme.labelMedium
+                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  subtitle: Text(item.value, style: theme.textTheme.bodyMedium),
+                ),
+              ))
+          .toList(),
+    );
+  }
+}
+
+class _AnalysisItem {
+  const _AnalysisItem(this.icon, this.label, this.value);
+  final IconData icon;
+  final String label;
+  final String value;
 }

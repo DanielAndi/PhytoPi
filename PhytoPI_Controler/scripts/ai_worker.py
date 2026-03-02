@@ -89,15 +89,75 @@ def _fetch_image_bytes(supabase, storage_path: str):
 # ---------------------------------------------------------------------------
 # Real inference with Moondream
 # ---------------------------------------------------------------------------
-def _run_ollama(image_bytes: bytes) -> dict:
-    prompt = (
-        "You are a plant health expert. Analyze the plant in this image.\n"
-        "Respond in exactly this format:\n"
-        "STATUS: healthy OR needs_attention\n"
-        "OBSERVATION: <one sentence describing the plant's appearance>\n"
-        "DIAGNOSTIC: <2 sentences on plant health>\n"
-        "TIPS:\n- <tip 1>\n- <tip 2>\n- <tip 3>\n"
+def _build_prompt(sensor_context: str) -> str:
+    sensor_section = (
+        f"\n\nCurrent sensor readings from the grow environment:\n{sensor_context}\n"
+        "Use these readings alongside the visual evidence to improve accuracy."
+        if sensor_context else ""
     )
+    return (
+        "You are an expert botanist and plant health specialist."
+        f"{sensor_section}\n\n"
+        "Carefully examine the plant in this image and respond ONLY with a valid JSON object "
+        "— no markdown fences, no explanation, just the raw JSON.\n\n"
+        "Use exactly this structure:\n"
+        "{\n"
+        '  "species": "<most likely common name and/or scientific name, or Unknown>",\n'
+        '  "leaf_color": "<primary and secondary leaf colours>",\n'
+        '  "leaf_area": "<sparse / moderate / dense>",\n'
+        '  "leaf_condition": "<texture, shape, curling, spots, necrosis>",\n'
+        '  "growth_stage": "<seedling / vegetative / flowering / fruiting / mature / dormant>",\n'
+        '  "health_status": "<healthy or needs_attention>",\n'
+        '  "disease_signs": "<visible disease, pests, discoloration, wilting — or None visible>",\n'
+        '  "soil_observation": "<visible soil moisture or root issues — or Not visible>",\n'
+        '  "environment_assessment": "<1 sentence on whether sensor readings support or conflict with visual health>",\n'
+        '  "diagnostic": "<2-3 sentence overall plant health summary integrating visual and sensor data>",\n'
+        '  "tips": ["<tip 1>", "<tip 2>", "<tip 3>"]\n'
+        "}"
+    )
+
+
+def _fetch_sensor_readings(supabase, device_id: str) -> str:
+    """
+    Fetch the latest reading for each sensor type attached to this device.
+    Returns a formatted string for injection into the prompt, or empty string on failure.
+    """
+    try:
+        # Get all sensors for this device with their type keys and units
+        sensors = supabase.table("sensors").select(
+            "id, label, sensor_types(key, name, unit)"
+        ).eq("device_id", device_id).execute().data
+
+        if not sensors:
+            return ""
+
+        lines = []
+        for sensor in sensors:
+            sensor_id = sensor["id"]
+            st = sensor.get("sensor_types") or {}
+            key = st.get("key", "unknown")
+            name = st.get("name", key)
+            unit = st.get("unit", "")
+            label = sensor.get("label") or name
+
+            # Get latest reading for this sensor
+            reading = supabase.table("readings").select("value, ts").eq(
+                "sensor_id", sensor_id
+            ).order("ts", desc=True).limit(1).execute().data
+
+            if reading:
+                val = reading[0]["value"]
+                ts = reading[0]["ts"][:16].replace("T", " ")  # trim to minutes
+                lines.append(f"  - {label} ({key}): {val} {unit}  [at {ts}]")
+
+        return "\n".join(lines) if lines else ""
+    except Exception as e:
+        print(f"Warning: could not fetch sensor readings: {e}", file=sys.stderr)
+        return ""
+
+
+def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
+    prompt = _build_prompt(sensor_context)
     try:
         response = _ollama.chat(
             model=OLLAMA_MODEL,
@@ -112,39 +172,41 @@ def _run_ollama(image_bytes: bytes) -> dict:
         print(f"Ollama inference error: {e}", file=sys.stderr)
         return _stub_result(None)
 
-    # Parse the structured response
-    lines = text.splitlines()
-    plant_state = "healthy"
-    observation = ""
-    diagnostic = ""
-    tips = []
-    in_tips = False
+    # Strip markdown fences if model ignores instructions
+    if text.startswith("```"):
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
 
-    for line in lines:
-        line = line.strip()
-        if line.upper().startswith("STATUS:"):
-            plant_state = "needs_attention" if "needs_attention" in line.lower() else "healthy"
-        elif line.upper().startswith("OBSERVATION:"):
-            observation = line.split(":", 1)[1].strip()
-        elif line.upper().startswith("DIAGNOSTIC:"):
-            diagnostic = line.split(":", 1)[1].strip()
-        elif line.upper().startswith("TIPS:"):
-            in_tips = True
-        elif in_tips and line.startswith("-"):
-            tips.append(line.lstrip("- ").strip())
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # Fallback: extract what we can from plain text
+        print(f"Warning: model did not return valid JSON, using raw text.", file=sys.stderr)
+        data = {"diagnostic": text[:500], "health_status": "healthy"}
 
-    if not observation:
-        observation = text[:200]
-    if not diagnostic:
-        diagnostic = observation
-    if not tips:
+    plant_state = "needs_attention" if data.get("health_status", "").lower() == "needs_attention" else "healthy"
+    tips = data.get("tips", [])
+    if not isinstance(tips, list) or not tips:
         tips = ["Monitor plant regularly.", "Ensure adequate water and light.", "Check soil moisture weekly."]
 
     return {
-        "observations": [observation],
+        "observations": [data.get("leaf_condition", "")],
         "plant_state": plant_state,
-        "diagnostic": diagnostic,
+        "diagnostic": data.get("diagnostic", ""),
         "tips": tips,
+        # Rich analysis fields stored in result for the UI
+        "analysis": {
+            "species": data.get("species", "Unknown"),
+            "leaf_color": data.get("leaf_color", ""),
+            "leaf_area": data.get("leaf_area", ""),
+            "leaf_condition": data.get("leaf_condition", ""),
+            "growth_stage": data.get("growth_stage", ""),
+            "health_status": plant_state,
+            "disease_signs": data.get("disease_signs", "None visible"),
+            "soil_observation": data.get("soil_observation", "Not visible"),
+        },
     }
 
 
@@ -198,9 +260,12 @@ def main():
             supabase.table("ai_capture_jobs").update({"status": "processing"}).eq("id", job_id).execute()
 
             image_bytes = _fetch_image_bytes(supabase, image_storage_path) if image_storage_path else None
+            sensor_context = _fetch_sensor_readings(supabase, device_id)
+            if sensor_context:
+                print(f"  -> Sensor context:\n{sensor_context}")
 
             if HAS_OLLAMA and image_bytes:
-                result = _run_ollama(image_bytes)
+                result = _run_ollama(image_bytes, sensor_context)
             else:
                 result = _stub_result(image_bytes)
 
@@ -211,6 +276,7 @@ def main():
             llm_result = {
                 "diagnostic": result["diagnostic"],
                 "tips": result["tips"],
+                "analysis": result.get("analysis", {}),
             }
 
             supabase.table("ai_capture_jobs").update({
@@ -222,7 +288,11 @@ def main():
 
             supabase.table("ml_inferences").insert({
                 "device_id": device_id,
-                "result": {"vision": vision_result, "llm": llm_result},
+                "result": {
+                    "vision": vision_result,
+                    "llm": llm_result,
+                    "sensor_snapshot": sensor_context,
+                },
                 "diagnostic": result["diagnostic"],
                 "tips": result["tips"],
                 "image_url": image_storage_path,
