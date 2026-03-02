@@ -213,9 +213,15 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        # Fallback: extract what we can from plain text
         print(f"Warning: model did not return valid JSON, using raw text.", file=sys.stderr)
         data = {"diagnostic": text[:500], "health_status": "healthy"}
+
+    # Moondream sometimes wraps the object in an array — unwrap if so.
+    if isinstance(data, list):
+        data = next((item for item in data if isinstance(item, dict)), {})
+    if not isinstance(data, dict):
+        print(f"Warning: unexpected JSON type ({type(data).__name__}), falling back.", file=sys.stderr)
+        data = {}
 
     plant_state = "needs_attention" if data.get("health_status", "").lower() == "needs_attention" else "healthy"
 
