@@ -23,6 +23,9 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 PROCESSING_TIMEOUT_SECONDS = int(os.environ.get("AI_JOB_PROCESSING_TIMEOUT_SECONDS", "300"))
+# Jobs older than this are abandoned (failed) rather than re-queued.
+# Set to 0 to re-queue all stale jobs regardless of age.
+MAX_RECOVERY_AGE_SECONDS = int(os.environ.get("AI_JOB_MAX_RECOVERY_AGE_SECONDS", str(2 * 3600)))
 
 # ---------------------------------------------------------------------------
 # Load .env from the same directory as this script (or the working directory)
@@ -270,14 +273,25 @@ def main():
                         age_seconds = (datetime.now(timezone.utc) - created_at).total_seconds()
                         if age_seconds > PROCESSING_TIMEOUT_SECONDS:
                             stale_id = processing_job["id"]
-                            print(
-                                f"[{datetime.now().strftime('%H:%M:%S')}] "
-                                f"Re-queuing stale processing job {stale_id} "
-                                f"(age {int(age_seconds)}s)"
-                            )
-                            supabase.table("ai_capture_jobs").update({"status": "pending"}).eq(
-                                "id", stale_id
-                            ).execute()
+                            # If the job is too old to be worth retrying, mark it failed.
+                            if MAX_RECOVERY_AGE_SECONDS > 0 and age_seconds > MAX_RECOVERY_AGE_SECONDS:
+                                print(
+                                    f"[{datetime.now().strftime('%H:%M:%S')}] "
+                                    f"Abandoning old stale job {stale_id} "
+                                    f"(age {int(age_seconds / 3600):.1f}h > limit {MAX_RECOVERY_AGE_SECONDS // 3600}h)"
+                                )
+                                supabase.table("ai_capture_jobs").update({"status": "failed"}).eq(
+                                    "id", stale_id
+                                ).execute()
+                            else:
+                                print(
+                                    f"[{datetime.now().strftime('%H:%M:%S')}] "
+                                    f"Re-queuing stale processing job {stale_id} "
+                                    f"(age {int(age_seconds)}s)"
+                                )
+                                supabase.table("ai_capture_jobs").update({"status": "pending"}).eq(
+                                    "id", stale_id
+                                ).execute()
                             time.sleep(1)
                             continue
                 time.sleep(10)
