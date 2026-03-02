@@ -127,15 +127,17 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
     def q(label: str, question: str) -> str:
         print(f"  -> Querying: {label}")
         try:
-            return _query(image_bytes, question)
+            answer = _query(image_bytes, question)
+            print(f"     <- {answer[:120]}")
+            return answer
         except Exception as e:
             print(f"     Query error ({label}): {e}", file=sys.stderr)
             return ""
 
     species = q(
         "species",
-        "What species of plant is in this image? "
-        "Reply with only the plant name (common name and scientific name if known).",
+        "What type of plant is shown in this image? "
+        "Reply with only the common plant name (one to three words, e.g. tomato, snake plant, peace lily).",
     )
 
     health_raw = q(
