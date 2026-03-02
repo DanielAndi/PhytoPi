@@ -334,9 +334,10 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
 
   Future<String> _getImageUrl(String path) async {
     try {
-      final url = SupabaseConfig.client!.storage
+      // device-images is a private bucket — use a signed URL (valid 1 hour)
+      final url = await SupabaseConfig.client!.storage
           .from('device-images')
-          .getPublicUrl(path);
+          .createSignedUrl(path, 3600);
       return url;
     } catch (_) {
       return '';
