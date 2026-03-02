@@ -15,7 +15,8 @@ class AiHealthScreen extends StatefulWidget {
 }
 
 class _AiHealthScreenState extends State<AiHealthScreen> {
-  Map<String, dynamic>? _latestJob;
+  Map<String, dynamic>? _latestCompletedJob;  // for displaying the captured image
+  Map<String, dynamic>? _inProgressJob;       // pending or processing job (shows spinner)
   Map<String, dynamic>? _latestInference;
   bool _loading = true;
   String? _error;
@@ -52,7 +53,8 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
     if (device == null || !SupabaseConfig.isInitialized) {
       setState(() {
         _loading = false;
-        _latestJob = null;
+        _latestCompletedJob = null;
+        _inProgressJob = null;
         _latestInference = null;
       });
       return;
@@ -64,13 +66,25 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
     });
 
     try {
-      final jobs = await SupabaseConfig.client!
+      // Latest completed job — used to show the captured image
+      final completedJobs = await SupabaseConfig.client!
           .from('ai_capture_jobs')
           .select()
           .eq('device_id', device.id)
+          .eq('status', 'completed')
           .order('created_at', ascending: false)
           .limit(1);
 
+      // Any currently pending or processing job — shows the spinner
+      final pendingJobs = await SupabaseConfig.client!
+          .from('ai_capture_jobs')
+          .select()
+          .eq('device_id', device.id)
+          .inFilter('status', ['pending', 'processing'])
+          .order('created_at', ascending: false)
+          .limit(1);
+
+      // Latest inference — always shown independently of job status
       final inferences = await SupabaseConfig.client!
           .from(SupabaseConfig.mlInferencesTable)
           .select()
@@ -80,8 +94,12 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
 
       if (mounted) {
         setState(() {
-          _latestJob = (jobs as List).isNotEmpty ? jobs.first : null;
-          _latestInference = (inferences as List).isNotEmpty ? inferences.first : null;
+          _latestCompletedJob =
+              (completedJobs as List).isNotEmpty ? completedJobs.first : null;
+          _inProgressJob =
+              (pendingJobs as List).isNotEmpty ? pendingJobs.first : null;
+          _latestInference =
+              (inferences as List).isNotEmpty ? inferences.first : null;
           _loading = false;
         });
       }
@@ -157,19 +175,17 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
       );
     }
 
-    final job = _latestJob;
     final inference = _latestInference;
     final diagnostic = inference?['diagnostic'] as String?;
     final tips = inference?['tips'] as List?;
-    final imageUrl = job?['image_url'] as String?;
-    final status = job?['status'] as String?;
+    final imageUrl = _latestCompletedJob?['image_url'] as String?;
+    final inProgressStatus = _inProgressJob?['status'] as String?;
     final resultMap = inference?['result'] as Map<String, dynamic>?;
     final analysis = resultMap?['llm']?['analysis'] as Map<String, dynamic>?;
     final sensorSnapshot = resultMap?['sensor_snapshot'] as String?;
     final envAssessment = analysis?['environment_assessment'] as String?;
     final healthStatus = analysis?['health_status'] as String? ??
-        (inference?['result'] as Map<String, dynamic>?)?['vision']
-            ?['plant_state'] as String?;
+        resultMap?['vision']?['plant_state'] as String?;
     final isHealthy = healthStatus != 'needs_attention';
 
     return RefreshIndicator(
@@ -256,7 +272,27 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
             // Captured image
             Text('AI Capture', style: theme.textTheme.titleLarge),
             const SizedBox(height: 8),
-            if (imageUrl != null && status == 'completed') ...[
+
+            // In-progress banner (shown above the last completed image if a new job is running)
+            if (inProgressStatus != null)
+              Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    children: [
+                      const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2)),
+                      const SizedBox(width: 14),
+                      Text('New capture in progress ($inProgressStatus)…'),
+                    ],
+                  ),
+                ),
+              ),
+
+            if (imageUrl != null) ...[
               FutureBuilder<String>(
                 future: _getImageUrl(imageUrl),
                 builder: (context, snap) {
@@ -272,30 +308,11 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
                       ),
                     );
                   }
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return _placeholderImage(theme);
-                  }
                   return _placeholderImage(theme);
                 },
               ),
               const SizedBox(height: 24),
-            ] else if (status == 'pending' || status == 'processing')
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2)),
-                      const SizedBox(width: 16),
-                      Text('Processing... ($status)'),
-                    ],
-                  ),
-                ),
-              )
-            else if (job == null)
+            ] else if (inProgressStatus == null)
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
