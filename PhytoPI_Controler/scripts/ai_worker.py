@@ -19,7 +19,6 @@ import os
 import re
 import sys
 import time
-import json
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -104,109 +103,133 @@ def _fetch_image_bytes(supabase, storage_path: str):
 
 
 # ---------------------------------------------------------------------------
-# Real inference with Moondream
+# Real inference with Moondream — multi-query VQA pattern
+# Moondream is a VQA model; one focused question per field is far more
+# reliable than asking it to fill a multi-field JSON template in one shot.
 # ---------------------------------------------------------------------------
-def _build_prompt(sensor_context: str) -> str:
-    # Sensor readings are kept as individual lines so the model can reason
-    # about each value separately when writing environment_assessment.
-    sensor_section = ""
-    if sensor_context:
-        lines = [l.strip() for l in sensor_context.splitlines() if l.strip()]
-        sensor_section = (
-            "\n\nCurrent grow-environment sensor readings:\n"
-            + "\n".join(f"  {l}" for l in lines)
-        )
 
-    return (
-        "You are a plant health expert. Carefully examine the plant in this image."
-        f"{sensor_section}\n\n"
-        "ALL fields are REQUIRED — replace every placeholder with a real observation.\n"
-        "Reply ONLY with raw JSON (no markdown fences, no extra text):\n"
-        '{\n'
-        '  "species": "<common name and scientific name, or Unknown>",\n'
-        '  "health_status": "<healthy or needs_attention>",\n'
-        '  "leaf_color": "<primary and secondary leaf colours>",\n'
-        '  "leaf_area": "<sparse or moderate or dense>",\n'
-        '  "leaf_condition": "<texture, shape, spots, curling, or necrosis>",\n'
-        '  "growth_stage": "<seedling or vegetative or flowering or fruiting or mature>",\n'
-        '  "disease_signs": "<visible disease, pests, discoloration — or None>",\n'
-        '  "soil_observation": "<visible moisture level or root issues — or Not visible>",\n'
-        '  "environment_assessment": "<1 sentence: how the sensor readings support or stress this plant>",\n'
-        '  "diagnostic": "<2 sentence health summary integrating visual and sensor evidence>",\n'
-        '  "tips": ["<specific actionable tip 1>", "<specific actionable tip 2>", "<specific actionable tip 3>"]\n'
-        '}'
+# Matches "1. tip text", "2) tip text", etc. for parsing the tips response.
+_TIP_RE = re.compile(r'^\s*\d+[\.\)]\s*(.+)', re.MULTILINE)
+
+
+def _query(image_bytes: bytes, question: str) -> str:
+    """Send the image with a single focused question; return the model's answer."""
+    response = _ollama.chat(
+        model=OLLAMA_MODEL,
+        messages=[{"role": "user", "content": question, "images": [image_bytes]}],
+    )
+    return response["message"]["content"].strip()
+
+
+def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
+    sensors = sensor_context if sensor_context else "No sensor data available."
+
+    def q(label: str, question: str) -> str:
+        print(f"  -> Querying: {label}")
+        try:
+            return _query(image_bytes, question)
+        except Exception as e:
+            print(f"     Query error ({label}): {e}", file=sys.stderr)
+            return ""
+
+    species = q(
+        "species",
+        "What species of plant is in this image? "
+        "Reply with only the plant name (common name and scientific name if known).",
     )
 
+    health_raw = q(
+        "health_status",
+        "Is this plant healthy or showing signs of disease or stress? "
+        "Reply with only the word 'healthy' or 'needs_attention'.",
+    )
+    plant_state = (
+        "needs_attention" if "needs_attention" in health_raw.lower() else "healthy"
+    )
 
-# Matches unfilled template placeholders the model may echo back verbatim, e.g. "<tip1>".
-_PLACEHOLDER_RE = re.compile(r'^\s*<[^>]+>\s*$')
+    leaf_color = q(
+        "leaf_color",
+        "What are the primary and secondary leaf colors of this plant?",
+    )
 
+    leaf_area = q(
+        "leaf_area",
+        "How dense is the leaf coverage of this plant? "
+        "Reply with only one word: sparse, moderate, or dense.",
+    )
 
-def _is_placeholder(v) -> bool:
-    return bool(_PLACEHOLDER_RE.match(str(v).strip()))
+    leaf_condition = q(
+        "leaf_condition",
+        "Describe the condition of the leaves: include texture, shape, "
+        "any spots, curling, or necrosis.",
+    )
 
+    growth_stage = q(
+        "growth_stage",
+        "What growth stage is this plant in? "
+        "Reply with only one word: seedling, vegetative, flowering, fruiting, or mature.",
+    )
 
-def _clean_str(v, fallback: str = "") -> str:
-    """Return a clean string, turning lists into comma-joined text and
-    discarding placeholder text or numeric confidence scores the model may emit."""
-    if v is None:
-        return fallback
-    # Moondream sometimes returns floats (confidence scores) for text fields.
-    if isinstance(v, (int, float)):
-        return fallback
-    if isinstance(v, list):
-        parts = [str(i).strip() for i in v if i and not isinstance(i, (int, float)) and not _is_placeholder(str(i))]
-        return ", ".join(parts) if parts else fallback
-    s = str(v).strip()
-    return fallback if not s or _is_placeholder(s) else s
+    disease_signs = q(
+        "disease_signs",
+        "Are there any visible diseases, pests, or discoloration on this plant? "
+        "Describe them briefly, or reply 'None' if there are none.",
+    )
 
+    soil_obs = q(
+        "soil_observation",
+        "What can you observe about the soil moisture or roots in this image? "
+        "Reply 'Not visible' if the soil is not visible.",
+    )
 
-def _extract_json(text: str) -> dict:
-    """Robustly extract the first JSON object from model output.
+    env_assessment = q(
+        "environment_assessment",
+        f"The plant's grow-environment sensor readings are:\n{sensors}\n\n"
+        "In one sentence, explain how these conditions support or stress this plant.",
+    )
 
-    Handles common Moondream quirks:
-    - Preamble / postamble prose around the JSON block
-    - Markdown fences (```json ... ```)
-    - The object wrapped in an array
-    - Truncated or otherwise invalid JSON
-    """
-    # Strip markdown fences first
-    if "```" in text:
-        parts = text.split("```")
-        for part in parts:
-            if part.startswith("json"):
-                part = part[4:]
-            part = part.strip()
-            if part.startswith("{"):
-                text = part
-                break
+    diagnostic = q(
+        "diagnostic",
+        f"The plant's grow-environment sensor readings are:\n{sensors}\n\n"
+        "In two sentences, summarise this plant's overall health based on what you "
+        "see in the image and the sensor data.",
+    )
 
-    # Try the whole string as-is
-    try:
-        result = json.loads(text)
-        if isinstance(result, dict):
-            return result
-        if isinstance(result, list):
-            return next((i for i in result if isinstance(i, dict)), {})
-    except json.JSONDecodeError:
-        pass
+    tips_raw = q(
+        "tips",
+        f"The plant's grow-environment sensor readings are:\n{sensors}\n\n"
+        "Give three specific, actionable care tips for this plant based on what you "
+        "see in the image and the sensor data. "
+        "Format your answer as a numbered list:\n1. ...\n2. ...\n3. ...",
+    )
+    tips = _TIP_RE.findall(tips_raw)
+    if not tips and tips_raw:
+        tips = [tips_raw]
+    tips = [t.strip() for t in tips[:3] if t.strip()]
+    if not tips:
+        tips = [
+            "Monitor plant regularly.",
+            "Ensure adequate water and light.",
+            "Check soil moisture weekly.",
+        ]
 
-    # Find the outermost {...} block and try that
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            result = json.loads(text[start : end + 1])
-            if isinstance(result, dict):
-                return result
-            if isinstance(result, list):
-                return next((i for i in result if isinstance(i, dict)), {})
-        except json.JSONDecodeError:
-            pass
-
-    # Last resort: surface the raw text as a diagnostic string
-    print("Warning: could not extract JSON from model output; using raw text.", file=sys.stderr)
-    return {"diagnostic": text[:500], "health_status": "healthy"}
+    return {
+        "observations": [leaf_condition] if leaf_condition else [],
+        "plant_state": plant_state,
+        "diagnostic": diagnostic,
+        "tips": tips,
+        "analysis": {
+            "species": species or "Unknown",
+            "leaf_color": leaf_color,
+            "leaf_area": leaf_area,
+            "leaf_condition": leaf_condition,
+            "growth_stage": growth_stage,
+            "health_status": plant_state,
+            "disease_signs": disease_signs or "None visible",
+            "soil_observation": soil_obs or "Not visible",
+            "environment_assessment": env_assessment,
+        },
+    }
 
 
 def _fetch_sensor_readings(supabase, device_id: str) -> str:
