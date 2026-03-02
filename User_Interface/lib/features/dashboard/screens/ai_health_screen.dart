@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../core/config/app_config.dart';
@@ -18,19 +20,42 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
   Map<String, dynamic>? _latestCompletedJob;  // for displaying the captured image
   Map<String, dynamic>? _inProgressJob;       // pending or processing job (shows spinner)
   Map<String, dynamic>? _latestInference;
+  List<Map<String, dynamic>> _historyJobs = [];
   bool _loading = true;
   String? _error;
   _StreamState _streamState = _StreamState.loading;
   String _streamUrl = '';
+  Timer? _refreshTimer;
+  String? _currentDeviceId;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (!mounted || _loading) return;
+      _load(silent: true);
+    });
     _streamUrl = _cacheBustUrl(AppConfig.streamUrl);
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) setState(() => _streamState = _StreamState.live);
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final deviceId = context.read<DeviceProvider>().selectedDevice?.id;
+    if (deviceId != _currentDeviceId) {
+      _currentDeviceId = deviceId;
+      _load();
+    }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   String _cacheBustUrl(String base) {
@@ -48,7 +73,7 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
     });
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool silent = false}) async {
     final device = context.read<DeviceProvider>().selectedDevice;
     if (device == null || !SupabaseConfig.isInitialized) {
       setState(() {
@@ -56,14 +81,17 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
         _latestCompletedJob = null;
         _inProgressJob = null;
         _latestInference = null;
+        _historyJobs = [];
       });
       return;
     }
 
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
 
     try {
       // Latest completed job — used to show the captured image
@@ -92,15 +120,32 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
           .order('timestamp', ascending: false)
           .limit(1);
 
+      final historyJobs = await SupabaseConfig.client!
+          .from('ai_capture_jobs')
+          .select('id, image_url, status, llm_result, vision_result, processed_at, created_at')
+          .eq('device_id', device.id)
+          .eq('status', 'completed')
+          .order('created_at', ascending: false)
+          .limit(20);
+
       if (mounted) {
+        final latestCompleted = (completedJobs as List).isNotEmpty
+            ? completedJobs.first as Map<String, dynamic>
+            : null;
+        final latestInference = (inferences as List).isNotEmpty
+            ? inferences.first as Map<String, dynamic>
+            : _inferenceFromJob(latestCompleted);
+
         setState(() {
-          _latestCompletedJob =
-              (completedJobs as List).isNotEmpty ? completedJobs.first : null;
+          _latestCompletedJob = latestCompleted;
           _inProgressJob =
               (pendingJobs as List).isNotEmpty ? pendingJobs.first : null;
-          _latestInference =
-              (inferences as List).isNotEmpty ? inferences.first : null;
+          _latestInference = latestInference;
+          _historyJobs = List<Map<String, dynamic>>.from(
+            (historyJobs as List).map((e) => Map<String, dynamic>.from(e as Map)),
+          );
           _loading = false;
+          _error = null;
         });
       }
     } catch (e) {
@@ -111,6 +156,158 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
         });
       }
     }
+  }
+
+  Map<String, dynamic>? _inferenceFromJob(Map<String, dynamic>? job) {
+    if (job == null) return null;
+    final llm = _asMap(job['llm_result']);
+    final vision = _asMap(job['vision_result']);
+    if (llm == null && vision == null) return null;
+    return {
+      'diagnostic': llm?['diagnostic'],
+      'tips': llm?['tips'] ?? const [],
+      'result': {
+        'vision': vision ?? const {},
+        'llm': llm ?? const {},
+        'sensor_snapshot': '',
+      },
+      'created_at': job['processed_at'] ?? job['created_at'],
+    };
+  }
+
+  Map<String, dynamic>? _asMap(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) return Map<String, dynamic>.from(value);
+    return null;
+  }
+
+  String _formatDate(dynamic raw) {
+    if (raw is! String || raw.isEmpty) return 'Unknown time';
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return raw;
+    final local = parsed.toLocal();
+    final y = local.year.toString().padLeft(4, '0');
+    final m = local.month.toString().padLeft(2, '0');
+    final d = local.day.toString().padLeft(2, '0');
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
+    return '$y-$m-$d $hh:$mm';
+  }
+
+  void _showHistorySheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        final theme = Theme.of(context);
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.86,
+            child: _historyJobs.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.history, size: 48, color: theme.disabledColor),
+                        const SizedBox(height: 12),
+                        Text('No AI history yet', style: theme.textTheme.titleMedium),
+                      ],
+                    ),
+                  )
+                : Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                        child: Row(
+                          children: [
+                            Text('AI Capture History', style: theme.textTheme.titleLarge),
+                            const Spacer(),
+                            IconButton(
+                              onPressed: () => Navigator.of(context).pop(),
+                              icon: const Icon(Icons.close),
+                              tooltip: 'Close',
+                            ),
+                          ],
+                        ),
+                      ),
+                      Expanded(
+                        child: ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                          itemCount: _historyJobs.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 8),
+                          itemBuilder: (_, index) {
+                            final job = _historyJobs[index];
+                            final llm = _asMap(job['llm_result']);
+                            final vision = _asMap(job['vision_result']);
+                            final imagePath = job['image_url'] as String?;
+                            final diagnostic = (llm?['diagnostic'] as String?) ?? 'No diagnostic';
+                            final plantState = (vision?['plant_state'] as String?) ?? 'unknown';
+                            final processedAt = _formatDate(job['processed_at'] ?? job['created_at']);
+                            return Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          plantState == 'needs_attention'
+                                              ? Icons.warning_amber_rounded
+                                              : Icons.check_circle_outline,
+                                          color: plantState == 'needs_attention'
+                                              ? Colors.orange.shade700
+                                              : Colors.green.shade700,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            '$processedAt • ${plantState.replaceAll('_', ' ')}',
+                                            style: theme.textTheme.labelLarge,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 10),
+                                    if (imagePath != null && imagePath.isNotEmpty)
+                                      FutureBuilder<String>(
+                                        future: _getImageUrl(imagePath),
+                                        builder: (context, snap) {
+                                          if (!snap.hasData || snap.data!.isEmpty) {
+                                            return _placeholderImage(theme);
+                                          }
+                                          return ClipRRect(
+                                            borderRadius: BorderRadius.circular(8),
+                                            child: Image.network(
+                                              snap.data!,
+                                              height: 180,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) =>
+                                                  _placeholderImage(theme),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      diagnostic,
+                                      style: theme.textTheme.bodyMedium,
+                                      maxLines: 4,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _triggerCapture() async {
@@ -180,12 +377,13 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
     final tips = inference?['tips'] as List?;
     final imageUrl = _latestCompletedJob?['image_url'] as String?;
     final inProgressStatus = _inProgressJob?['status'] as String?;
-    final resultMap = inference?['result'] as Map<String, dynamic>?;
-    final analysis = resultMap?['llm']?['analysis'] as Map<String, dynamic>?;
+    final resultMap = _asMap(inference?['result']);
+    final analysis = _asMap(_asMap(resultMap?['llm'])?['analysis']) ??
+        _asMap(_asMap(_latestCompletedJob?['llm_result'])?['analysis']);
     final sensorSnapshot = resultMap?['sensor_snapshot'] as String?;
     final envAssessment = analysis?['environment_assessment'] as String?;
     final healthStatus = analysis?['health_status'] as String? ??
-        resultMap?['vision']?['plant_state'] as String?;
+        _asMap(resultMap?['vision'])?['plant_state'] as String?;
     final isHealthy = healthStatus != 'needs_attention';
 
     return RefreshIndicator(
@@ -201,10 +399,20 @@ class _AiHealthScreenState extends State<AiHealthScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('AI Plant Health', style: theme.textTheme.headlineSmall),
-                FilledButton.icon(
-                  onPressed: _triggerCapture,
-                  icon: const Icon(Icons.camera_alt),
-                  label: const Text('Capture Now'),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _showHistorySheet,
+                      icon: const Icon(Icons.history),
+                      label: const Text('View History'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: _triggerCapture,
+                      icon: const Icon(Icons.camera_alt),
+                      label: const Text('Capture Now'),
+                    ),
+                  ],
                 ),
               ],
             ),
