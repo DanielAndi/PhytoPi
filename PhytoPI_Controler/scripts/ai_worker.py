@@ -62,10 +62,11 @@ except ImportError:
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# Vision inference via Ollama (llava-phi3)
-# Ollama uses llama.cpp - works on old CPUs (Sandy Bridge, no AVX2 required)
+# Vision inference via Ollama (moondream:1.8b)
+# Moondream is a compact VLM (~2.2-2.8 GB) optimised for OCR/VQA on
+# resource-constrained hardware.  2 K context window — keep prompts short.
 # Install: curl -fsSL https://ollama.com/install.sh | sh
-#          ollama pull llava-phi3
+#          ollama pull moondream:1.8b   # or moondream:latest
 #          pip install ollama Pillow
 # ---------------------------------------------------------------------------
 try:
@@ -75,9 +76,9 @@ try:
 except ImportError:
     HAS_OLLAMA = False
     print("Warning: ollama not installed. Using placeholder results.", file=sys.stderr)
-    print("  Install: pip install ollama && ollama pull llava-phi3", file=sys.stderr)
+    print("  Install: pip install ollama && ollama pull moondream:1.8b", file=sys.stderr)
 
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llava-phi3")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "moondream:1.8b")
 
 
 def _parse_iso_ts(value):
@@ -105,30 +106,24 @@ def _fetch_image_bytes(supabase, storage_path: str):
 # Real inference with Moondream
 # ---------------------------------------------------------------------------
 def _build_prompt(sensor_context: str) -> str:
-    sensor_section = (
-        f"\n\nCurrent sensor readings from the grow environment:\n{sensor_context}\n"
-        "Use these readings alongside the visual evidence to improve accuracy."
-        if sensor_context else ""
-    )
+    # Keep the prompt compact — moondream:1.8b has a 2 K context window.
+    sensor_section = ""
+    if sensor_context:
+        # Flatten multi-line sensor block into a single compact line.
+        lines = [l.strip() for l in sensor_context.splitlines() if l.strip()]
+        sensor_section = " Sensors: " + "; ".join(lines) + "."
+
     return (
-        "You are an expert botanist and plant health specialist."
-        f"{sensor_section}\n\n"
-        "Carefully examine the plant in this image and respond ONLY with a valid JSON object "
-        "— no markdown fences, no explanation, just the raw JSON.\n\n"
-        "Use exactly this structure:\n"
-        "{\n"
-        '  "species": "<most likely common name and/or scientific name, or Unknown>",\n'
-        '  "leaf_color": "<primary and secondary leaf colours>",\n'
-        '  "leaf_area": "<sparse / moderate / dense>",\n'
-        '  "leaf_condition": "<texture, shape, curling, spots, necrosis>",\n'
-        '  "growth_stage": "<seedling / vegetative / flowering / fruiting / mature / dormant>",\n'
-        '  "health_status": "<healthy or needs_attention>",\n'
-        '  "disease_signs": "<visible disease, pests, discoloration, wilting — or None visible>",\n'
-        '  "soil_observation": "<visible soil moisture or root issues — or Not visible>",\n'
-        '  "environment_assessment": "<1 sentence on whether sensor readings support or conflict with visual health>",\n'
-        '  "diagnostic": "<2-3 sentence overall plant health summary integrating visual and sensor data>",\n'
-        '  "tips": ["<tip 1>", "<tip 2>", "<tip 3>"]\n'
-        "}"
+        f"Analyze this plant image.{sensor_section} "
+        "Reply ONLY with this JSON (no markdown fences, no extra text):\n"
+        '{"species":"<common name or Unknown>",'
+        '"health_status":"<healthy or needs_attention>",'
+        '"disease_signs":"<issues or None>",'
+        '"leaf_condition":"<colour, texture, spots>",'
+        '"growth_stage":"<seedling/vegetative/flowering/fruiting/mature>",'
+        '"soil_observation":"<visible moisture or Not visible>",'
+        '"diagnostic":"<2 sentence health summary>",'
+        '"tips":["<tip1>","<tip2>","<tip3>"]}'
     )
 
 
@@ -232,7 +227,7 @@ def _stub_result(_image_bytes) -> dict:
     return {
         "observations": ["Plant visible", "Leaves present"],
         "plant_state": "healthy",
-        "diagnostic": "Plant appears healthy based on image analysis. (stub - install moondream for real results)",
+        "diagnostic": "Plant appears healthy based on image analysis. (stub — run: ollama pull moondream:1.8b)",
         "tips": [
             "Continue current watering schedule.",
             "Ensure adequate light exposure.",
