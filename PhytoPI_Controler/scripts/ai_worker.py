@@ -148,14 +148,65 @@ def _is_placeholder(v) -> bool:
 
 def _clean_str(v, fallback: str = "") -> str:
     """Return a clean string, turning lists into comma-joined text and
-    discarding any value that looks like an unfilled template placeholder."""
+    discarding placeholder text or numeric confidence scores the model may emit."""
     if v is None:
         return fallback
+    # Moondream sometimes returns floats (confidence scores) for text fields.
+    if isinstance(v, (int, float)):
+        return fallback
     if isinstance(v, list):
-        parts = [str(i).strip() for i in v if i and not _is_placeholder(str(i))]
+        parts = [str(i).strip() for i in v if i and not isinstance(i, (int, float)) and not _is_placeholder(str(i))]
         return ", ".join(parts) if parts else fallback
     s = str(v).strip()
     return fallback if not s or _is_placeholder(s) else s
+
+
+def _extract_json(text: str) -> dict:
+    """Robustly extract the first JSON object from model output.
+
+    Handles common Moondream quirks:
+    - Preamble / postamble prose around the JSON block
+    - Markdown fences (```json ... ```)
+    - The object wrapped in an array
+    - Truncated or otherwise invalid JSON
+    """
+    # Strip markdown fences first
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts:
+            if part.startswith("json"):
+                part = part[4:]
+            part = part.strip()
+            if part.startswith("{"):
+                text = part
+                break
+
+    # Try the whole string as-is
+    try:
+        result = json.loads(text)
+        if isinstance(result, dict):
+            return result
+        if isinstance(result, list):
+            return next((i for i in result if isinstance(i, dict)), {})
+    except json.JSONDecodeError:
+        pass
+
+    # Find the outermost {...} block and try that
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            result = json.loads(text[start : end + 1])
+            if isinstance(result, dict):
+                return result
+            if isinstance(result, list):
+                return next((i for i in result if isinstance(i, dict)), {})
+        except json.JSONDecodeError:
+            pass
+
+    # Last resort: surface the raw text as a diagnostic string
+    print("Warning: could not extract JSON from model output; using raw text.", file=sys.stderr)
+    return {"diagnostic": text[:500], "health_status": "healthy"}
 
 
 def _fetch_sensor_readings(supabase, device_id: str) -> str:
@@ -213,27 +264,14 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
         print(f"Ollama inference error: {e}", file=sys.stderr)
         return _stub_result(None)
 
-    # Strip markdown fences if model ignores instructions
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
+    data = _extract_json(text)
 
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        print(f"Warning: model did not return valid JSON, using raw text.", file=sys.stderr)
-        data = {"diagnostic": text[:500], "health_status": "healthy"}
-
-    # Moondream sometimes wraps the object in an array — unwrap if so.
-    if isinstance(data, list):
-        data = next((item for item in data if isinstance(item, dict)), {})
-    if not isinstance(data, dict):
-        print(f"Warning: unexpected JSON type ({type(data).__name__}), falling back.", file=sys.stderr)
-        data = {}
-
-    plant_state = "needs_attention" if data.get("health_status", "").lower() == "needs_attention" else "healthy"
+    raw_status = data.get("health_status", "")
+    plant_state = (
+        "needs_attention"
+        if isinstance(raw_status, str) and raw_status.lower() == "needs_attention"
+        else "healthy"
+    )
 
     # Strip placeholder items the model may have echoed back verbatim.
     raw_tips = data.get("tips", [])
