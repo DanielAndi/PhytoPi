@@ -4,23 +4,40 @@ PhytoPi AI Worker - runs on home PC / server
 Polls ai_capture_jobs for pending jobs, runs Moondream vision inference,
 writes diagnostic + tips back to ai_capture_jobs and ml_inferences.
 
+Species identification uses a two-stage hybrid pipeline:
+  1. moondream:1.8b answers the species question.
+  2. If the answer looks uncertain (hedging words, vague, etc.) AND a
+     PLANTNET_API_KEY is set, the PlantNet API is queried as a fallback.
+     PlantNet is purpose-built for plant taxonomy and returns a real
+     confidence score (0-1).  If its top result score >= PLANTNET_CONFIDENCE_THRESHOLD
+     the PlantNet name is used; otherwise the moondream answer is kept.
+
 Usage:
     python3 scripts/ai_worker.py
 
 Environment (set in .env file next to this script, or export before running):
-    SUPABASE_URL               - your Supabase project URL
-    SUPABASE_SERVICE_ROLE_KEY  - service role key (bypasses RLS)
-    SUPABASE_ANON_KEY          - fallback if service role not set
+    SUPABASE_URL                    - your Supabase project URL
+    SUPABASE_SERVICE_ROLE_KEY       - service role key (bypasses RLS)
+    SUPABASE_ANON_KEY               - fallback if service role not set
+    PLANTNET_API_KEY                - PlantNet API key (get one free at https://my.plantnet.org)
+    PLANTNET_CONFIDENCE_THRESHOLD   - minimum PlantNet score to accept (default: 0.20)
 
 Models (installed via pip):
     pip install moondream pillow requests supabase
 """
+import io
 import os
 import re
 import sys
 import time
 from pathlib import Path
 from datetime import datetime, timezone
+
+try:
+    import requests as _requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
 
 PROCESSING_TIMEOUT_SECONDS = int(os.environ.get("AI_JOB_PROCESSING_TIMEOUT_SECONDS", "300"))
 # Jobs older than this are abandoned (failed) rather than re-queued.
@@ -80,6 +97,73 @@ except ImportError:
 
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "moondream:1.8b")
 
+# ---------------------------------------------------------------------------
+# PlantNet API — species identification fallback
+# Free tier: 500 requests/day.  Sign up at https://my.plantnet.org
+# If PLANTNET_API_KEY is not set the fallback is silently skipped.
+# ---------------------------------------------------------------------------
+PLANTNET_API_KEY = os.environ.get("PLANTNET_API_KEY", "")
+PLANTNET_CONFIDENCE_THRESHOLD = float(
+    os.environ.get("PLANTNET_CONFIDENCE_THRESHOLD", "0.20")
+)
+PLANTNET_URL = "https://my-api.plantnet.org/v2/identify/all"
+
+# Words/phrases that indicate moondream isn't sure about the species.
+_LOW_CONFIDENCE_SIGNALS = frozenset([
+    "i think", "possibly", "appears to be", "may be", "might be",
+    "not sure", "cannot identify", "i'm not sure", "i am not sure",
+    "hard to tell", "difficult to identify", "unclear", "i cannot",
+    "i don't know", "i do not know",
+])
+
+
+def _is_low_confidence_species(answer: str) -> bool:
+    """Return True if moondream's species answer looks uncertain."""
+    text = answer.lower().strip()
+    if not text:
+        return True
+    # Vague single-word catch-alls
+    if text in {"unknown", "plant", "a plant", "flower", "tree", "shrub", "herb"}:
+        return True
+    # Rambling sentence = model is guessing
+    if len(text.split()) > 8:
+        return True
+    return any(phrase in text for phrase in _LOW_CONFIDENCE_SIGNALS)
+
+
+def _identify_species_plantnet(image_bytes: bytes) -> tuple:
+    """
+    Query the PlantNet API with the image.
+    Returns (common_name: str, confidence: float).
+    Returns ("", 0.0) on any failure or if the key is not set.
+    """
+    if not PLANTNET_API_KEY or not HAS_REQUESTS:
+        return "", 0.0
+
+    try:
+        resp = _requests.post(
+            PLANTNET_URL,
+            params={"api-key": PLANTNET_API_KEY, "lang": "en", "nb-results": 3},
+            files=[("images", ("plant.jpg", io.BytesIO(image_bytes), "image/jpeg"))],
+            data={"organs": ["auto"]},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        if not results:
+            return "", 0.0
+
+        top = results[0]
+        score = float(top.get("score", 0.0))
+        species_data = top.get("species", {})
+        common_names = species_data.get("commonNames", [])
+        scientific = species_data.get("scientificName", "")
+        name = common_names[0] if common_names else scientific
+        return name, score
+    except Exception as exc:
+        print(f"  PlantNet API error: {exc}", file=sys.stderr)
+        return "", 0.0
+
 
 def _parse_iso_ts(value):
     if not value or not isinstance(value, str):
@@ -134,11 +218,37 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
             print(f"     Query error ({label}): {e}", file=sys.stderr)
             return ""
 
-    species = q(
+    species_raw = q(
         "species",
         "What type of plant is shown in this image? "
         "Reply with only the common plant name (one to three words, e.g. tomato, snake plant, peace lily).",
     )
+
+    # --- Hybrid species identification ---
+    # If moondream looks uncertain AND a PlantNet key is configured, ask the
+    # purpose-built plant taxonomy API as a second opinion.
+    species_source = "moondream"
+    species_confidence = None
+
+    if _is_low_confidence_species(species_raw) and PLANTNET_API_KEY:
+        print("  -> Species confidence low — querying PlantNet API as fallback ...")
+        plantnet_name, plantnet_score = _identify_species_plantnet(image_bytes)
+        if plantnet_name and plantnet_score >= PLANTNET_CONFIDENCE_THRESHOLD:
+            species = plantnet_name
+            species_source = "plantnet"
+            species_confidence = round(plantnet_score, 3)
+            print(f"     <- PlantNet: {species} (score {plantnet_score:.1%})")
+        else:
+            species = species_raw or "Unknown"
+            if plantnet_name:
+                print(
+                    f"     PlantNet score too low ({plantnet_score:.1%} < "
+                    f"{PLANTNET_CONFIDENCE_THRESHOLD:.0%}), keeping moondream answer"
+                )
+            else:
+                print("     PlantNet returned no result, keeping moondream answer")
+    else:
+        species = species_raw or "Unknown"
 
     health_raw = q(
         "health_status",
@@ -222,6 +332,8 @@ def _run_ollama(image_bytes: bytes, sensor_context: str = "") -> dict:
         "tips": tips,
         "analysis": {
             "species": species or "Unknown",
+            "species_source": species_source,
+            "species_confidence": species_confidence,
             "leaf_color": leaf_color,
             "leaf_area": leaf_area,
             "leaf_condition": leaf_condition,
