@@ -12,8 +12,13 @@ PhytoPi is an IoT-based controlled environment system for supporting a plant thr
 
     make
 <h3>4. Run the generated executable file</h3>
-
+    
     ./bin/run
+
+    
+# Solidworks Preview
+<img width="1350" height="1080" alt="PhytoPi" src="https://github.com/user-attachments/assets/5efd4670-2253-43a4-aa8e-8eb1a2116ae1" />
+
 # File Structure
 <img width="355" height="722" alt="image" src="https://github.com/user-attachments/assets/a883e9dc-7954-40b6-a0e9-4b862f6ef480" />
 
