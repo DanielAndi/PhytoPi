@@ -40,7 +40,6 @@ node_modules/
 
 # Build outputs
 dist/
-<<<<<<< HEAD
 bin/
 
 # Object files
@@ -50,9 +49,7 @@ bin/
 # SQLite database files
 *.db
 sensor_data.db
-=======
 build/
-
 
 # OrcaSlicer Files
 *.3mf
