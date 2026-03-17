@@ -19,7 +19,7 @@ static int water_level_initialized = 0;
 static int pwm_initialized = 0;
 
 #define PWM_CHIP "/sys/class/pwm/pwmchip0"
-#define PWM_PERIOD_NS 40000  /* 25kHz = 40us period */
+#define PWM_PERIOD_NS 40000 /* 25kHz = 40us period */
 
 /*
  * Initialize GPIO library (opens chip, gets line for given pin)
@@ -80,11 +80,31 @@ int gpio_read(void)
  */
 int gpio_cleanup(void)
 {
-    if (line_lights) { gpiod_line_release(line_lights); line_lights = NULL; }
-    if (line_pump) { gpiod_line_release(line_pump); line_pump = NULL; }
-    if (line_water_level) { gpiod_line_release(line_water_level); line_water_level = NULL; }
-    if (line) { gpiod_line_release(line); line = NULL; }
-    if (chip) { gpiod_chip_close(chip); chip = NULL; }
+    if (line_lights)
+    {
+        gpiod_line_release(line_lights);
+        line_lights = NULL;
+    }
+    if (line_pump)
+    {
+        gpiod_line_release(line_pump);
+        line_pump = NULL;
+    }
+    if (line_water_level)
+    {
+        gpiod_line_release(line_water_level);
+        line_water_level = NULL;
+    }
+    if (line)
+    {
+        gpiod_line_release(line);
+        line = NULL;
+    }
+    if (chip)
+    {
+        gpiod_chip_close(chip);
+        chip = NULL;
+    }
     gpio_initialized = 0;
     lights_initialized = 0;
     pump_initialized = 0;
@@ -211,7 +231,7 @@ int fans_init(void)
 {
     if (pwm_initialized)
         return 0;
-    if (pwm_export(0) != 0 && pwm_export(0) != 0)  /* May fail if already exported */
+    if (pwm_export(0) != 0 && pwm_export(0) != 0) /* May fail if already exported */
         ;
     if (pwm_export(1) != 0 && pwm_export(1) != 0)
         ;
@@ -225,8 +245,10 @@ int fans_set_speed(int fan_id, int duty_percent)
         return -1;
     if (fan_id != 1 && fan_id != 2)
         return -1;
-    if (duty_percent < 0) duty_percent = 0;
-    if (duty_percent > 100) duty_percent = 100;
+    if (duty_percent < 0)
+        duty_percent = 0;
+    if (duty_percent > 100)
+        duty_percent = 100;
     int ch = (fan_id == 1) ? 0 : 1;
     int duty_ns = (PWM_PERIOD_NS * duty_percent) / 100;
     return pwm_set(ch, PWM_PERIOD_NS, duty_ns);
@@ -273,7 +295,7 @@ int read_photoelectric_water_level(int *frequency_hz)
     clock_gettime(CLOCK_MONOTONIC, &start);
     int last = gpiod_line_get_value(line_water_level);
     int count = 0;
-    const long timeout_ns = 100000000;  /* 100ms */
+    const long timeout_ns = 100000000; /* 100ms */
 
     while (1)
     {
@@ -289,7 +311,7 @@ int read_photoelectric_water_level(int *frequency_hz)
         usleep(100);
     }
 
-    *frequency_hz = count * 10;  /* 100ms -> 10 samples/sec for Hz */
+    *frequency_hz = count * 10; /* 100ms -> 10 samples/sec for Hz */
     return 0;
 }
 
@@ -313,46 +335,26 @@ int i2c_init(const char *i2c_bus)
 }
 
 /*
- * Reads a given channel from the ADS7830 ADC over I2C.
+ * Reads a given channel from the PCF8591 ADC over I2C.
  * Returns the 8-bit ADC value on success, -1 on failure.
  */
-int read_ads7830_channel(int fd, int channel)
+int read_pcf8591_channel(int fd, int channel)
 {
-    if (channel < 0 || channel > 7)
+    if (channel < 0 || channel > 3)
         return -1;
 
-    // ADS7830 Command Byte: SD C2 C1 C0 PD1 PD0 X X
-    // SD (Single-Ended/Differential) = 1 for Single-Ended
-    // PD1, PD0 = 0, 1 (Internal Reference OFF, A/D ON) => 0x04
-    // Channel Selection (C2, C1, C0) mapping:
-    // CH0: 000 (0x0) -> 0x84
-    // CH1: 100 (0x4) -> 0xC4
-    // CH2: 001 (0x1) -> 0x94
-    // CH3: 101 (0x5) -> 0xD4
-    // CH4: 010 (0x2) -> 0xA4
-    // CH5: 110 (0x6) -> 0xE4
-    // CH6: 011 (0x3) -> 0xB4
-    // CH7: 111 (0x7) -> 0xF4
-
-    unsigned char channel_map[] = {
-        0x84, // CH0
-        0xC4, // CH1
-        0x94, // CH2
-        0xD4, // CH3
-        0xA4, // CH4
-        0xE4, // CH5
-        0xB4, // CH6
-        0xF4  // CH7
-    };
-
-    unsigned char cmd = channel_map[channel];
+    // Control byte: 0x40 | channel number
+    unsigned char cmd = 0x40 | (channel & 0x03);
     unsigned char data;
 
-    // Send the command byte
     if (write(fd, &cmd, 1) != 1)
         return -1;
 
-    // Read one byte (8-bit ADC value)
+    // First read is stale, discard it
+    if (read(fd, &data, 1) != 1)
+        return -1;
+
+    // Second read is fresh
     if (read(fd, &data, 1) != 1)
         return -1;
 
