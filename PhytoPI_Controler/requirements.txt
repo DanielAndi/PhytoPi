@@ -1,0 +1,9 @@
+# PhytoPi AI Worker dependencies
+# Install: pip install -r requirements.txt
+#
+# Vision inference uses Ollama (works on old CPUs - no AVX2 required):
+#   curl -fsSL https://ollama.com/install.sh | sh
+#   ollama pull llava-phi3
+
+supabase
+ollama

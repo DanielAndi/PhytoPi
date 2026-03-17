@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:phytopi_dashboard/shared/controllers/smooth_scroll_controller.dart';
 import '../../../core/platform/platform_detector.dart';
 import '../../../core/config/app_config.dart';
@@ -12,13 +13,13 @@ import '../providers/device_provider.dart';
 import 'charts_screen.dart';
 import 'alerts_screen.dart';
 import 'devices_screen.dart';
-import 'camera_screen.dart';
 import 'ai_health_screen.dart';
 import '../../settings/screens/profile_screen.dart';
 import '../../support/screens/help_support_screen.dart';
 import '../../settings/screens/settings_screen.dart';
 import '../widgets/dashboard_gauge.dart';
 import '../widgets/dashboard_chart.dart';
+import '../widgets/water_level_gauge.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -102,18 +103,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // ... Kiosk Layout omitted for brevity as we are focusing on Web ...
-  // Keeping the existing method signature but potentially simplifying content if needed.
-  // For this task, I'm assuming Kiosk layout is fine as is or out of scope for "Web testing".
-  // But I need to include the method to avoid errors.
   Widget _buildKioskLayout(BuildContext context) {
-    // Just reusing the scaffold from before but adapting slightly to avoid compilation errors if I removed helper methods
-    // Or I can just paste the original kiosk code back.
-    // Since I'm rewriting the file, I should include it.
-    // I'll use a simplified placeholder for Kiosk to save space if the user didn't ask for it, 
-    // but better to be safe and include a basic version.
-    return Scaffold(
-        body: Center(child: Text("Kiosk Mode (Use Web/Mobile for testing new features)")));
+    return _buildWebLayout(context);
   }
 
 
@@ -135,7 +126,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const DevicesScreen(),
           const ChartsScreen(),
           const AlertsScreen(),
-          const CameraScreen(),
+          const AiHealthScreen(),
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
@@ -146,8 +137,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Dashboard'),
           BottomNavigationBarItem(icon: Icon(Icons.devices), label: 'Devices'),
           BottomNavigationBarItem(icon: Icon(Icons.bar_chart), label: 'Charts'),
-          BottomNavigationBarItem(icon: Icon(Icons.notifications), label: 'Alerts'),
-          BottomNavigationBarItem(icon: Icon(Icons.videocam), label: 'Camera'),
+          BottomNavigationBarItem(icon: Icon(Icons.notifications), label: 'Alerts & Cmd'),
+          BottomNavigationBarItem(icon: Icon(Icons.health_and_safety), label: 'AI Health'),
         ],
       ),
     );
@@ -252,12 +243,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               NavigationRailDestination(
                 icon: Icon(Icons.notifications_outlined),
                 selectedIcon: Icon(Icons.notifications),
-                label: Text('Alerts'),
+                label: Text('Alerts & Cmd'),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.videocam_outlined),
-                selectedIcon: Icon(Icons.videocam),
-                label: Text('Camera'),
+                icon: Icon(Icons.health_and_safety_outlined),
+                selectedIcon: Icon(Icons.health_and_safety),
+                label: Text('AI Health'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.person_outline),
@@ -275,7 +266,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const DevicesScreen(),
                 const ChartsScreen(),
                 const AlertsScreen(),
-                const CameraScreen(),
+                const AiHealthScreen(),
                 _buildProfileView(context),
               ],
             ),
@@ -290,7 +281,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Consumer<AuthProvider>(
       builder: (context, authProvider, child) {
         final user = authProvider.user;
-        final email = user?.email ?? 'Guest';
+
+        if (user == null) {
+          return _buildKioskSignInForm(context, authProvider, theme);
+        }
+
+        final email = user.email ?? 'Guest';
         final initial = email.isNotEmpty ? email[0].toUpperCase() : '?';
 
         return Center(
@@ -325,8 +321,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     onPressed: () async {
                        await authProvider.signOut();
                        if (context.mounted) {
-                         // Let main.dart Consumer handle the route switch.
-                         // If we were pushed (e.g. from LandingPage), pop to clear the stack.
                          if (Navigator.canPop(context)) {
                            Navigator.pop(context);
                          }
@@ -348,6 +342,103 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Widget _buildKioskSignInForm(BuildContext context, AuthProvider authProvider, ThemeData theme) {
+    final emailController = TextEditingController();
+    final passwordController = TextEditingController();
+
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 400),
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Icon(Icons.lock_outline, size: 48, color: theme.primaryColor),
+            const SizedBox(height: 16),
+            Text('Sign In', style: theme.textTheme.headlineSmall, textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text(
+              'Sign in to send commands to your device',
+              style: theme.textTheme.bodyMedium?.copyWith(color: theme.textTheme.bodySmall?.color),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            OutlinedButton.icon(
+              onPressed: authProvider.isLoading
+                  ? null
+                  : () async {
+                      authProvider.clearError();
+                      await authProvider.signInWithOAuth(OAuthProvider.google);
+                      if (context.mounted && authProvider.error == null) {
+                        await context.read<DeviceProvider>().refreshDevices();
+                      }
+                    },
+              icon: const Icon(Icons.g_mobiledata, size: 24),
+              label: const Text('Sign in with Google'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(children: [const Expanded(child: Divider()), Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('or', style: theme.textTheme.bodySmall)), const Expanded(child: Divider())]),
+            const SizedBox(height: 24),
+            TextField(
+              controller: emailController,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                prefixIcon: Icon(Icons.email_outlined),
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.emailAddress,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: passwordController,
+              decoration: const InputDecoration(
+                labelText: 'Password',
+                prefixIcon: Icon(Icons.lock_outlined),
+                border: OutlineInputBorder(),
+              ),
+              obscureText: true,
+            ),
+            if (authProvider.error != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                authProvider.error!,
+                style: const TextStyle(color: Colors.red),
+                textAlign: TextAlign.center,
+              ),
+            ],
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: authProvider.isLoading
+                  ? null
+                  : () async {
+                      authProvider.clearError();
+                      await authProvider.signIn(
+                        emailController.text.trim(),
+                        passwordController.text,
+                      );
+                      if (context.mounted && authProvider.error == null) {
+                        await context.read<DeviceProvider>().refreshDevices();
+                      }
+                    },
+              icon: authProvider.isLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.login),
+              label: const Text('Sign In'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildDashboardContent(BuildContext context) {
     final theme = Theme.of(context);
 
@@ -363,7 +454,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final humidityPoints = historicalReadings['humidity'] ?? [];
         final lightPoints = historicalReadings['light_lux'] ?? [];
         final soilPoints = historicalReadings['soil_moisture'] ?? [];
-        final waterPoints = historicalReadings['water_level'] ?? [];
+        final waterPoints = historicalReadings['water_level_frequency'] ?? historicalReadings['water_level'] ?? [];
 
         return SingleChildScrollView(
           controller: _webScrollController, // Shared controller for simplicity
@@ -422,6 +513,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               
               if (selectedDevice != null) ...[
+                if (deviceProvider.hasWaterLevelLowAlert)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.15),
+                      border: Border.all(color: Colors.red),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.water_drop, color: Colors.red, size: 32),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Water Level Low',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                    color: Colors.red[900], fontWeight: FontWeight.bold),
+                              ),
+                              const Text('Refill the reservoir. See Alerts & Commands for details.'),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              if (PlatformDetector.isWeb) _webSelectedIndex = 3;
+                              else _mobileSelectedIndex = 3;
+                            });
+                          },
+                          child: const Text('View Alerts'),
+                        ),
+                      ],
+                    ),
+                  ),
                 // GAUGES ROW
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -472,18 +601,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           width: (width - (16 * (count - 1))) / count,
                           height: 250,
                           child: DashboardGauge(
-                            title: 'Light Level',
-                            value: latestReadings['light_lux'] ?? 0,
-                            min: 0,
-                            max: 2000, // Adjusted for Lux
-                            unit: 'lux',
-                            color: Colors.amber,
-                          ),
-                        ),
-                        SizedBox(
-                          width: (width - (16 * (count - 1))) / count,
-                          height: 250,
-                          child: DashboardGauge(
                             title: 'Soil Moisture',
                             value: latestReadings['soil_moisture'] ?? 0,
                             min: 0,
@@ -495,13 +612,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         SizedBox(
                           width: (width - (16 * (count - 1))) / count,
                           height: 250,
-                          child: DashboardGauge(
+                          child: WaterLevelGauge(
                             title: 'Water Level',
-                            value: latestReadings['water_level'] ?? 0,
+                            value: latestReadings['water_level_frequency'] ?? latestReadings['water_level'] ?? 0,
+                          ),
+                        ),
+                        SizedBox(
+                          width: (width - (16 * (count - 1))) / count,
+                          height: 250,
+                          child: DashboardGauge(
+                            title: 'Pressure',
+                            value: latestReadings['pressure'] ?? 0,
+                            min: 900,
+                            max: 1100,
+                            unit: 'hPa',
+                            color: Colors.purple,
+                          ),
+                        ),
+                        SizedBox(
+                          width: (width - (16 * (count - 1))) / count,
+                          height: 250,
+                          child: DashboardGauge(
+                            title: 'Gas / VOC',
+                            value: latestReadings['gas_resistance'] ?? 0,
                             min: 0,
-                            max: 100,
-                            unit: '%',
-                            color: Colors.cyan,
+                            max: 500,
+                            unit: 'kOhm',
+                            color: Colors.teal,
                           ),
                         ),
                       ],
@@ -585,8 +722,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   title: 'Water Level Trend',
                                   dataPoints: waterPoints,
                                   minY: 0,
-                                  maxY: 100,
-                                  unit: '%',
+                                  maxY: (historicalReadings['water_level_frequency']?.isNotEmpty ?? false) ? 4 : 100,
+                                  unit: (historicalReadings['water_level_frequency']?.isNotEmpty ?? false) ? 'level' : '%',
                                   color: Colors.cyan,
                                 ),
                               ),

@@ -69,4 +69,10 @@ class AppConfig {
   static const bool enableAnalytics = true;
   static const bool enableNotifications = true;
   static const bool enableMLInsights = true;
+
+  /// Camera livestream URL for AI Health page. Use --dart-define=PHYTOPI_STREAM_URL=... at build.
+  static const String streamUrl = String.fromEnvironment(
+    'PHYTOPI_STREAM_URL',
+    defaultValue: 'http://phytopi.local:8000/stream.mjpg',
+  );
 }

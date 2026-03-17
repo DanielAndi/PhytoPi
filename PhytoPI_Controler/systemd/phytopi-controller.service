@@ -1,0 +1,24 @@
+[Unit]
+Description=PhytoPi Sensor Controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/phytopi
+ExecStart=/opt/phytopi/bin/phytopi
+Restart=always
+RestartSec=10
+# Writable data directory for SQLite (avoids "readonly database" errors)
+StateDirectory=phytopi
+# Database path: /var/lib/phytopi/sensor_data.db (created by StateDirectory)
+Environment=PHYTOPI_DB_PATH=/var/lib/phytopi/sensor_data.db
+# Load env from file (create /etc/phytopi/env with SUPABASE_URL, etc.)
+EnvironmentFile=-/etc/phytopi/env
+# Or set inline:
+# Environment=SUPABASE_URL=https://xxx.supabase.co
+# Environment=SUPABASE_ANON_KEY=xxx
+# Environment=SUPABASE_DEVICE_ID=xxx
+
+[Install]
+WantedBy=multi-user.target

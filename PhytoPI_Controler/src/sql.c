@@ -75,6 +75,8 @@ sqlite3 *db_init(const char *db_file)
     sql_execute(db, "CREATE TABLE IF NOT EXISTS soil_moisture_data (id INTEGER PRIMARY KEY, humidity INTEGER, timestamp INTEGER, synced INTEGER DEFAULT 0);");
     sql_execute(db, "CREATE TABLE IF NOT EXISTS water_level_data (id INTEGER PRIMARY KEY, has_water BOOLEAN, timestamp INTEGER, synced INTEGER DEFAULT 0);");
     sql_execute(db, "CREATE TABLE IF NOT EXISTS light_level_data (id INTEGER PRIMARY KEY, light_level INTEGER, timestamp INTEGER, synced INTEGER DEFAULT 0);");
+    sql_execute(db, "CREATE TABLE IF NOT EXISTS bme680_data (id INTEGER PRIMARY KEY, temperature REAL, humidity REAL, pressure REAL, gas_resistance REAL, timestamp INTEGER, synced INTEGER DEFAULT 0);");
+    sql_execute(db, "CREATE TABLE IF NOT EXISTS water_level_photoelectric (id INTEGER PRIMARY KEY, frequency_hz INTEGER, timestamp INTEGER, synced INTEGER DEFAULT 0);");
 
     // Migrate existing tables: add synced column if it doesn't exist
     // SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we check first
@@ -149,8 +151,38 @@ sqlite3 *db_init(const char *db_file)
     sql_execute(db, "CREATE INDEX IF NOT EXISTS idx_soil_moisture_synced ON soil_moisture_data(synced);");
     sql_execute(db, "CREATE INDEX IF NOT EXISTS idx_water_level_synced ON water_level_data(synced);");
     sql_execute(db, "CREATE INDEX IF NOT EXISTS idx_light_level_synced ON light_level_data(synced);");
+    sql_execute(db, "CREATE INDEX IF NOT EXISTS idx_bme680_synced ON bme680_data(synced);");
+    sql_execute(db, "CREATE INDEX IF NOT EXISTS idx_water_photoelectric_synced ON water_level_photoelectric(synced);");
 
     return db;
+}
+
+int sql_execute_insert_bme680(sqlite3 *db, double temp, double humidity, double pressure, double gas, int timestamp)
+{
+    const char *sql = "INSERT INTO bme680_data (temperature, humidity, pressure, gas_resistance, timestamp) VALUES (?, ?, ?, ?, ?);";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        return -1;
+    sqlite3_bind_double(stmt, 1, temp);
+    sqlite3_bind_double(stmt, 2, humidity);
+    sqlite3_bind_double(stmt, 3, pressure);
+    sqlite3_bind_double(stmt, 4, gas);
+    sqlite3_bind_int(stmt, 5, timestamp);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? SQLITE_OK : rc;
+}
+
+int sql_execute_insert_double(sqlite3 *db, const char *sql_str, double data, int timestamp)
+{
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(db, sql_str, -1, &stmt, NULL) != SQLITE_OK)
+        return -1;
+    sqlite3_bind_double(stmt, 1, data);
+    sqlite3_bind_int(stmt, 2, timestamp);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? SQLITE_OK : rc;
 }
 
 /*
@@ -175,7 +207,11 @@ int sql_get_unsynced_readings(sqlite3 *db, sqlite_reading_t **readings, int *cou
         "  UNION ALL "
         "  SELECT id FROM water_level_data WHERE synced = 0 "
         "  UNION ALL "
-        "  SELECT id FROM light_level_data WHERE synced = 0"
+        "  SELECT id FROM light_level_data WHERE synced = 0 "
+        "  UNION ALL "
+        "  SELECT id FROM bme680_data WHERE synced = 0 "
+        "  UNION ALL "
+        "  SELECT id FROM water_level_photoelectric WHERE synced = 0"
         ");";
 
     sqlite3_stmt *count_stmt;
@@ -214,6 +250,8 @@ int sql_get_unsynced_readings(sqlite3 *db, sqlite_reading_t **readings, int *cou
             (*readings)[idx].id = sqlite3_column_int(stmt, 0);
             (*readings)[idx].value1 = sqlite3_column_int(stmt, 1);
             (*readings)[idx].value2 = sqlite3_column_int(stmt, 2);
+            (*readings)[idx].value3 = 0;
+            (*readings)[idx].value4 = 0;
             (*readings)[idx].timestamp = sqlite3_column_int64(stmt, 3);
             strcpy((*readings)[idx].table_name, "temp_hum_data");
             idx++;
@@ -230,6 +268,8 @@ int sql_get_unsynced_readings(sqlite3 *db, sqlite_reading_t **readings, int *cou
             (*readings)[idx].id = sqlite3_column_int(stmt, 0);
             (*readings)[idx].value1 = sqlite3_column_int(stmt, 1);
             (*readings)[idx].value2 = 0;
+            (*readings)[idx].value3 = 0;
+            (*readings)[idx].value4 = 0;
             (*readings)[idx].timestamp = sqlite3_column_int64(stmt, 2);
             strcpy((*readings)[idx].table_name, "soil_moisture_data");
             idx++;
@@ -246,6 +286,8 @@ int sql_get_unsynced_readings(sqlite3 *db, sqlite_reading_t **readings, int *cou
             (*readings)[idx].id = sqlite3_column_int(stmt, 0);
             (*readings)[idx].value1 = sqlite3_column_int(stmt, 1);
             (*readings)[idx].value2 = 0;
+            (*readings)[idx].value3 = 0;
+            (*readings)[idx].value4 = 0;
             (*readings)[idx].timestamp = sqlite3_column_int64(stmt, 2);
             strcpy((*readings)[idx].table_name, "water_level_data");
             idx++;
@@ -262,8 +304,46 @@ int sql_get_unsynced_readings(sqlite3 *db, sqlite_reading_t **readings, int *cou
             (*readings)[idx].id = sqlite3_column_int(stmt, 0);
             (*readings)[idx].value1 = sqlite3_column_int(stmt, 1);
             (*readings)[idx].value2 = 0;
+            (*readings)[idx].value3 = 0;
+            (*readings)[idx].value4 = 0;
             (*readings)[idx].timestamp = sqlite3_column_int64(stmt, 2);
             strcpy((*readings)[idx].table_name, "light_level_data");
+            idx++;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    // Get unsynced bme680_data (value1=temp, value2=humidity, value3=pressure, value4=gas)
+    const char *bme_sql = "SELECT id, temperature, humidity, pressure, gas_resistance, timestamp FROM bme680_data WHERE synced = 0 ORDER BY timestamp LIMIT 100;";
+    if (sqlite3_prepare_v2(db, bme_sql, -1, &stmt, NULL) == SQLITE_OK)
+    {
+        while (sqlite3_step(stmt) == SQLITE_ROW && idx < *count)
+        {
+            (*readings)[idx].id = sqlite3_column_int(stmt, 0);
+            (*readings)[idx].value1 = sqlite3_column_double(stmt, 1);
+            (*readings)[idx].value2 = sqlite3_column_double(stmt, 2);
+            (*readings)[idx].value3 = sqlite3_column_double(stmt, 3);
+            (*readings)[idx].value4 = sqlite3_column_double(stmt, 4);
+            (*readings)[idx].timestamp = sqlite3_column_int64(stmt, 5);
+            strcpy((*readings)[idx].table_name, "bme680_data");
+            idx++;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    // Get unsynced water_level_photoelectric
+    const char *photo_sql = "SELECT id, frequency_hz, timestamp FROM water_level_photoelectric WHERE synced = 0 ORDER BY timestamp LIMIT 100;";
+    if (sqlite3_prepare_v2(db, photo_sql, -1, &stmt, NULL) == SQLITE_OK)
+    {
+        while (sqlite3_step(stmt) == SQLITE_ROW && idx < *count)
+        {
+            (*readings)[idx].id = sqlite3_column_int(stmt, 0);
+            (*readings)[idx].value1 = sqlite3_column_int(stmt, 1);
+            (*readings)[idx].value2 = 0;
+            (*readings)[idx].value3 = 0;
+            (*readings)[idx].value4 = 0;
+            (*readings)[idx].timestamp = sqlite3_column_int64(stmt, 2);
+            strcpy((*readings)[idx].table_name, "water_level_photoelectric");
             idx++;
         }
         sqlite3_finalize(stmt);

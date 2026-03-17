@@ -26,8 +26,18 @@ class DeviceProvider extends ChangeNotifier {
   bool _hasReadings = false;
   
   RealtimeChannel? _readingsSubscription;
+  RealtimeChannel? _alertsSubscription;
+  RealtimeChannel? _devicesSubscription;
+  List<Map<String, dynamic>> _alerts = [];
+  List<Map<String, dynamic>> _thresholds = [];
+  List<Map<String, dynamic>> _schedules = [];
+  Timer? _offlineCheckTimer;
+  Timer? _deviceRefreshTimer;
 
   List<Device> get devices => _devices;
+  List<Map<String, dynamic>> get alerts => _alerts;
+  List<Map<String, dynamic>> get thresholds => _thresholds;
+  List<Map<String, dynamic>> get schedules => _schedules;
   Device? get selectedDevice => _selectedDevice;
   List<Sensor> get sensors => _sensors;
   bool get isLoading => _isLoading;
@@ -42,42 +52,231 @@ class DeviceProvider extends ChangeNotifier {
     _loadDevices();
   }
 
-  Future<void> _loadDevices() async {
+  /// Reload devices from Supabase (e.g. after user signs in on kiosk).
+  Future<void> refreshDevices() async {
+    await _loadDevices();
+  }
+
+  Future<void> _sendCommand(String commandType, Map<String, dynamic> payload) async {
+    if (!SupabaseConfig.isInitialized) {
+      throw Exception('Supabase not configured — cannot send command');
+    }
+    if (_selectedDevice == null) {
+      throw Exception('No device selected — cannot send command');
+    }
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.deviceCommandsTable)
+        .insert({
+      'device_id': _selectedDevice!.id,
+      'command_type': commandType,
+      'payload': payload,
+    });
+  }
+
+  Future<void> toggleGrowLights(bool on) async {
+    try {
+      await _sendCommand('toggle_light', {'state': on});
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('DeviceProvider: Error toggling grow lights: $e');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> togglePump(bool on, {int? durationSec}) async {
+    try {
+      final payload = <String, dynamic>{'state': on};
+      if (durationSec != null) payload['duration_sec'] = durationSec;
+      await _sendCommand('toggle_pump', payload);
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('DeviceProvider: Error toggling pump: $e');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> toggleFans(bool on) async {
+    try {
+      await _sendCommand('toggle_fans', {'state': on});
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('DeviceProvider: Error toggling fans: $e');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> setFanSpeed(int fanId, int dutyPercent) async {
+    try {
+      await _sendCommand('set_fan_speed', {
+        'fan_id': fanId,
+        'duty_percent': dutyPercent.clamp(0, 100),
+      });
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('DeviceProvider: Error setting fan speed: $e');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> runVentilation({int durationSec = 300, int dutyPercent = 80}) async {
+    try {
+      await _sendCommand('run_ventilation', {
+        'duration_sec': durationSec,
+        'duty_percent': dutyPercent,
+      });
+    } catch (e) {
+      _error = e.toString();
+      debugPrint('DeviceProvider: Error running ventilation: $e');
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> _loadDevices({bool silent = false}) async {
     if (!SupabaseConfig.isInitialized) {
       _loadDemoDevices();
       return;
     }
 
-    _isLoading = true;
-    notifyListeners();
+    if (!silent) {
+      _isLoading = true;
+      notifyListeners();
+    }
 
     try {
       final response = await SupabaseConfig.client!
           .from(SupabaseConfig.devicesTable)
-          .select()
+          .select('id, name, last_seen, status, updated_at, created_at, registered_at')
           .order('created_at');
-      
+
       final data = response as List<dynamic>;
-      _devices = data.map((json) => Device.fromJson(json)).toList();
+      final lastReadingByDevice = await _fetchLatestReadingByDevice();
+      _devices = data.map((json) {
+        final row = Map<String, dynamic>.from(json as Map);
+        final deviceId = row['id']?.toString();
+        final lastReadingAt = deviceId != null ? lastReadingByDevice[deviceId] : null;
+        if (lastReadingAt != null) {
+          row['last_reading_at'] = lastReadingAt.toUtc().toIso8601String();
+        }
+        return Device.fromJson(row);
+      }).toList();
       
       // Auto-select first device if none selected
       if (_selectedDevice == null && _devices.isNotEmpty) {
         selectDevice(_devices.first);
       }
+
+      _subscribeToDevices();
+      _startOfflineCheckTimer();
+      _startDeviceRefreshTimer();
       
     } catch (e) {
-      _error = e.toString();
+      if (!silent) _error = e.toString();
       debugPrint('DeviceProvider: Error loading devices: $e');
     } finally {
-      _isLoading = false;
+      if (!silent) _isLoading = false;
       notifyListeners();
     }
   }
 
+  void _subscribeToDevices() {
+    if (_devicesSubscription != null) {
+      SupabaseConfig.client?.removeChannel(_devicesSubscription!);
+      _devicesSubscription = null;
+    }
+    _devicesSubscription = SupabaseConfig.client!
+        .channel('device_units')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: SupabaseConfig.devicesTable,
+          callback: (payload) {
+            final record = Map<String, dynamic>.from(payload.newRecord);
+            final id = record['id'] as String?;
+            if (id == null) return;
+            final idx = _devices.indexWhere((d) => d.id == id);
+            if (idx >= 0) {
+              // Merge: Realtime UPDATE may only send changed cols; preserve existing when missing
+              final existing = _devices[idx];
+              final merged = {
+                'id': existing.id,
+                'name': record['name'] ?? existing.name,
+                'status': record['status'],
+                'last_seen': record['last_seen'] ?? existing.lastSeen?.toUtc().toIso8601String(),
+                'last_reading_at': existing.lastReadingAt?.toUtc().toIso8601String(),
+                'updated_at': record['updated_at'],
+                'is_online': record['is_online'],
+              };
+              _devices[idx] = Device.fromJson(merged);
+              notifyListeners();
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  void _startOfflineCheckTimer() {
+    _offlineCheckTimer?.cancel();
+    // Rebuild UI every 15s so isOnline getter re-evaluates (devices may have gone offline)
+    _offlineCheckTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (_devices.isNotEmpty) notifyListeners();
+    });
+  }
+
+  void _startDeviceRefreshTimer() {
+    _deviceRefreshTimer?.cancel();
+    // Refresh devices every 45s to pick up last_seen (fallback if Realtime misses updates)
+    _deviceRefreshTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      if (SupabaseConfig.isInitialized && _devices.isNotEmpty) {
+        _loadDevices(silent: true);
+      }
+    });
+  }
+
+  Future<Map<String, DateTime>> _fetchLatestReadingByDevice() async {
+    final out = <String, DateTime>{};
+    try {
+      // Fallback online signal: if readings are arriving recently, device is active.
+      final cutoff = DateTime.now().toUtc().subtract(const Duration(seconds: 120)).toIso8601String();
+      final response = await SupabaseConfig.client!
+          .from(SupabaseConfig.readingsTable)
+          .select('ts, sensors!inner(device_id)')
+          .gte('ts', cutoff)
+          .order('ts', ascending: false)
+          .limit(1000);
+
+      for (final item in (response as List<dynamic>)) {
+        final row = Map<String, dynamic>.from(item as Map);
+        final tsRaw = row['ts']?.toString();
+        if (tsRaw == null || tsRaw.isEmpty) continue;
+        final ts = DateTime.tryParse(tsRaw);
+        if (ts == null) continue;
+
+        final sensorsObj = row['sensors'];
+        String? deviceId;
+        if (sensorsObj is Map<String, dynamic>) {
+          deviceId = sensorsObj['device_id']?.toString();
+        } else if (sensorsObj is List && sensorsObj.isNotEmpty && sensorsObj.first is Map<String, dynamic>) {
+          deviceId = (sensorsObj.first as Map<String, dynamic>)['device_id']?.toString();
+        }
+        if (deviceId == null || deviceId.isEmpty) continue;
+
+        out.putIfAbsent(deviceId, () => ts);
+      }
+    } catch (e) {
+      debugPrint('DeviceProvider: readings-based online fallback unavailable: $e');
+    }
+    return out;
+  }
+
   void _loadDemoDevices() {
     _devices = [
-      Device(id: 'demo-1', name: 'Living Room PhytoPi', isOnline: true, lastSeen: DateTime.now()),
-      Device(id: 'demo-2', name: 'Bedroom PhytoPi', isOnline: false, lastSeen: DateTime.now().subtract(const Duration(hours: 2))),
+      Device(id: 'demo-1', name: 'Living Room PhytoPi', lastSeen: DateTime.now()),
+      Device(id: 'demo-2', name: 'Bedroom PhytoPi', lastSeen: DateTime.now().subtract(const Duration(hours: 2))),
     ];
     
     if (_selectedDevice == null && _devices.isNotEmpty) {
@@ -94,6 +293,9 @@ class DeviceProvider extends ChangeNotifier {
     _latestReadings.clear();
     _historicalReadings.clear();
     _sensors.clear();
+    _alerts.clear();
+    _thresholds.clear();
+    _schedules.clear();
     _lastUpdate = null;
     _hasReadings = false;
     
@@ -135,7 +337,11 @@ class DeviceProvider extends ChangeNotifier {
         await _fetchInitialHistory();
         _subscribeToReadings();
       }
-      
+      await _fetchAlerts(deviceId);
+      _subscribeToAlerts(deviceId);
+      await _fetchThresholds(deviceId);
+      await _fetchSchedules(deviceId);
+
     } catch (e) {
       _error = e.toString();
       debugPrint('DeviceProvider: Error loading sensors: $e');
@@ -264,6 +470,196 @@ class DeviceProvider extends ChangeNotifier {
       SupabaseConfig.client?.removeChannel(_readingsSubscription!);
       _readingsSubscription = null;
     }
+    if (_alertsSubscription != null) {
+      SupabaseConfig.client?.removeChannel(_alertsSubscription!);
+      _alertsSubscription = null;
+    }
+    // Keep _devicesSubscription and _offlineCheckTimer - they persist across device selection
+  }
+
+  Future<void> _fetchAlerts(String deviceId) async {
+    try {
+      final response = await SupabaseConfig.client!
+          .from(SupabaseConfig.alertsTable)
+          .select()
+          .eq('device_id', deviceId)
+          .order('triggered_at', ascending: false)
+          .limit(50);
+      _alerts = List<Map<String, dynamic>>.from(response as List);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('DeviceProvider: Error fetching alerts: $e');
+    }
+  }
+
+  void _subscribeToAlerts(String deviceId) {
+    if (_alertsSubscription != null) {
+      SupabaseConfig.client?.removeChannel(_alertsSubscription!);
+      _alertsSubscription = null;
+    }
+    _alertsSubscription = SupabaseConfig.client!
+        .channel('alerts_$deviceId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: SupabaseConfig.alertsTable,
+          callback: (payload) {
+            final record = Map<String, dynamic>.from(payload.newRecord);
+            if (record['device_id'] == deviceId) {
+              _alerts.insert(0, record);
+              notifyListeners();
+            }
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: SupabaseConfig.alertsTable,
+          callback: (payload) {
+            final record = Map<String, dynamic>.from(payload.newRecord);
+            if (record['device_id'] == deviceId) {
+              final idx = _alerts.indexWhere((a) => a['id'] == record['id']);
+              if (idx >= 0) {
+                _alerts[idx] = record;
+                notifyListeners();
+              }
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  bool get hasWaterLevelLowAlert =>
+      _alerts.any((a) =>
+          a['type'] == 'water_level_low' && a['resolved_at'] == null);
+
+  List<Map<String, dynamic>> get activeAlerts =>
+      _alerts.where((a) => a['resolved_at'] == null).toList();
+
+  List<Map<String, dynamic>> get alertHistory =>
+      _alerts.where((a) => a['resolved_at'] != null).toList();
+
+  Future<void> _fetchThresholds(String deviceId) async {
+    try {
+      final response = await SupabaseConfig.client!
+          .from(SupabaseConfig.deviceThresholdsTable)
+          .select()
+          .eq('device_id', deviceId)
+          .order('metric');
+      _thresholds = List<Map<String, dynamic>>.from(response as List);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('DeviceProvider: Error fetching thresholds: $e');
+    }
+  }
+
+  Future<void> createThreshold(String deviceId, String metric, double? minValue, double? maxValue) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.deviceThresholdsTable)
+        .insert({
+      'device_id': deviceId,
+      'metric': metric,
+      'min_value': minValue,
+      'max_value': maxValue,
+      'enabled': true,
+    });
+    await _fetchThresholds(deviceId);
+  }
+
+  Future<void> updateThreshold(String id, {double? minValue, double? maxValue, bool? enabled}) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    final updates = <String, dynamic>{};
+    if (minValue != null) updates['min_value'] = minValue;
+    if (maxValue != null) updates['max_value'] = maxValue;
+    if (enabled != null) updates['enabled'] = enabled;
+    if (updates.isEmpty) return;
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.deviceThresholdsTable)
+        .update(updates)
+        .eq('id', id);
+    if (_selectedDevice != null) await _fetchThresholds(_selectedDevice!.id);
+  }
+
+  Future<void> _fetchSchedules(String deviceId) async {
+    try {
+      final response = await SupabaseConfig.client!
+          .from(SupabaseConfig.schedulesTable)
+          .select()
+          .eq('device_id', deviceId)
+          .order('schedule_type');
+      _schedules = List<Map<String, dynamic>>.from(response as List);
+      notifyListeners();
+    } catch (e) {
+      debugPrint('DeviceProvider: Error fetching schedules: $e');
+    }
+  }
+
+  Future<void> createSchedule(String deviceId, String scheduleType, {String? cronExpr, int? intervalSeconds, Map<String, dynamic>? payload}) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.schedulesTable)
+        .insert({
+      'device_id': deviceId,
+      'schedule_type': scheduleType,
+      'cron_expr': cronExpr,
+      'interval_seconds': intervalSeconds,
+      'payload': payload ?? {},
+      'enabled': true,
+    });
+    await _fetchSchedules(deviceId);
+  }
+
+  Future<void> updateSchedule(String id, {String? cronExpr, int? intervalSeconds, Map<String, dynamic>? payload, bool? enabled}) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    final updates = <String, dynamic>{};
+    if (cronExpr != null) updates['cron_expr'] = cronExpr;
+    if (intervalSeconds != null) updates['interval_seconds'] = intervalSeconds;
+    if (payload != null) updates['payload'] = payload;
+    if (enabled != null) updates['enabled'] = enabled;
+    if (updates.isEmpty) return;
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.schedulesTable)
+        .update(updates)
+        .eq('id', id);
+    if (_selectedDevice != null) await _fetchSchedules(_selectedDevice!.id);
+  }
+
+  Future<void> deleteSchedule(String id) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.schedulesTable)
+        .delete()
+        .eq('id', id);
+    if (_selectedDevice != null) await _fetchSchedules(_selectedDevice!.id);
+  }
+
+  Future<void> deleteThreshold(String id) async {
+    if (!SupabaseConfig.isInitialized) throw Exception('Supabase not configured');
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.deviceThresholdsTable)
+        .delete()
+        .eq('id', id);
+    if (_selectedDevice != null) await _fetchThresholds(_selectedDevice!.id);
+  }
+
+  Future<void> closeAlert(String alertId) async {
+    if (!SupabaseConfig.isInitialized) return;
+    try {
+      await SupabaseConfig.client!
+          .from(SupabaseConfig.alertsTable)
+          .update({'resolved_at': DateTime.now().toUtc().toIso8601String()})
+          .eq('id', alertId);
+      // Local update for immediate UI feedback (Realtime will also fire)
+      final idx = _alerts.indexWhere((a) => a['id'] == alertId);
+      if (idx >= 0) {
+        _alerts[idx] = {..._alerts[idx], 'resolved_at': DateTime.now().toUtc().toIso8601String()};
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('DeviceProvider: Error closing alert: $e');
+      rethrow;
+    }
   }
   
   // Demo Mode Simulation
@@ -279,6 +675,9 @@ class DeviceProvider extends ChangeNotifier {
       'light_lux': 850.0, // Lux
       'soil_moisture': 45.0,
       'water_level': 80.0,
+      'water_level_frequency': 2.0, // 0-4: Empty, Low, Mid, High, Full
+      'pressure': 1013.0,
+      'gas_resistance': 45.0,
     };
     _hasReadings = true;
     _lastUpdate = DateTime.now();
@@ -305,6 +704,18 @@ class DeviceProvider extends ChangeNotifier {
       'water_level': List.generate(10, (i) {
         final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
         return FlSpot(ts, 75 + Random().nextDouble() * 5);
+      }),
+      'water_level_frequency': List.generate(10, (i) {
+        final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
+        return FlSpot(ts, (2 + Random().nextDouble()).clamp(0.0, 4.0));
+      }),
+      'pressure': List.generate(10, (i) {
+        final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
+        return FlSpot(ts, 1010 + Random().nextDouble() * 10);
+      }),
+      'gas_resistance': List.generate(10, (i) {
+        final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
+        return FlSpot(ts, 40 + Random().nextDouble() * 20);
       }),
     };
     notifyListeners();
@@ -341,7 +752,7 @@ class DeviceProvider extends ChangeNotifier {
       
       // Update history
       final ts = now.millisecondsSinceEpoch.toDouble();
-      for (final key in ['temp_c', 'humidity', 'light_lux', 'soil_moisture', 'water_level']) {
+      for (final key in ['temp_c', 'humidity', 'light_lux', 'soil_moisture', 'water_level', 'water_level_frequency', 'pressure', 'gas_resistance']) {
          final history = _historicalReadings[key] ?? []; // Handle potential null if key not in initial map (though it should be)
          if (history.length >= 20) history.removeAt(0);
          
@@ -351,6 +762,9 @@ class DeviceProvider extends ChangeNotifier {
          else if (key == 'light_lux') val = newLight;
          else if (key == 'soil_moisture') val = newSoil;
          else if (key == 'water_level') val = newWater;
+         else if (key == 'water_level_frequency') val = (2 + Random().nextDouble()).clamp(0.0, 4.0);
+         else if (key == 'pressure') val = 1010 + Random().nextDouble() * 10;
+         else if (key == 'gas_resistance') val = 40 + Random().nextDouble() * 20;
 
          history.add(FlSpot(ts, val));
          _historicalReadings[key] = List.from(history);
@@ -363,6 +777,14 @@ class DeviceProvider extends ChangeNotifier {
   @override
   void dispose() {
     _unsubscribe();
+    if (_devicesSubscription != null) {
+      SupabaseConfig.client?.removeChannel(_devicesSubscription!);
+      _devicesSubscription = null;
+    }
+    _offlineCheckTimer?.cancel();
+    _offlineCheckTimer = null;
+    _deviceRefreshTimer?.cancel();
+    _deviceRefreshTimer = null;
     _demoTimer?.cancel();
     super.dispose();
   }
@@ -375,10 +797,9 @@ class DeviceProvider extends ChangeNotifier {
       if (!SupabaseConfig.isInitialized) {
         // Demo mode
         final newDevice = Device(
-          id: serialNumber, 
+          id: serialNumber,
           name: 'New Device ($serialNumber)',
-          isOnline: true,
-          lastSeen: DateTime.now()
+          lastSeen: DateTime.now(),
         );
         _devices.add(newDevice);
         selectDevice(newDevice);

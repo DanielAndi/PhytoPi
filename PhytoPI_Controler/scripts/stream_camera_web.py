@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-import io
+"""MJPEG stream server with USB camera auto-detect. Recovers on disconnect/reconnect."""
+import glob
+import os
 import subprocess
 import logging
 import socketserver
@@ -11,6 +13,7 @@ PORT = 8000
 WIDTH = 640
 HEIGHT = 480
 FRAMERATE = 24
+RECONNECT_DELAY = 5
 
 # HTML Page for direct browser viewing
 PAGE = """\
@@ -85,119 +88,112 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
 
 output = StreamingOutput()
 
+def find_usb_camera():
+    """Auto-detect first USB camera from /dev/video* (prefer video0)."""
+    devices = sorted(glob.glob("/dev/video*"))
+    if not devices:
+        return "/dev/video0"
+    # Prefer video0; otherwise first available
+    for d in devices:
+        if "video0" in d:
+            return d
+    return devices[0]
+
 def get_camera_command():
-    # Check for rpicam-vid (Bookworm) or libcamera-vid (Bullseye)
-    # We use --codec mjpeg to get MJPEG stream to stdout
-    # Note: --inline might be needed for some players, but for mjpeg container it should be fine.
-    # Use --nopreview to save resources
+    # Check for rpicam-vid (Bookworm) or libcamera-vid (Bullseye) - Pi camera
     cmd = None
     if subprocess.call("command -v rpicam-vid", shell=True, stdout=subprocess.DEVNULL) == 0:
         cmd = ["rpicam-vid", "-t", "0", "--width", str(WIDTH), "--height", str(HEIGHT), "--framerate", str(FRAMERATE), "--codec", "mjpeg", "--nopreview", "-o", "-"]
     elif subprocess.call("command -v libcamera-vid", shell=True, stdout=subprocess.DEVNULL) == 0:
         cmd = ["libcamera-vid", "-t", "0", "--width", str(WIDTH), "--height", str(HEIGHT), "--framerate", str(FRAMERATE), "--codec", "mjpeg", "--nopreview", "-o", "-"]
-    elif subprocess.call("command -v raspivid", shell=True, stdout=subprocess.DEVNULL) == 0:
-        # Raspivid produces H264, not MJPEG natively in a way easy to pipe frame-by-frame without raspimjpeg
-        # So we might fail back or try to use raspistill in burst mode?
-        # Or ffmpeg?
-        # For legacy, let's assume ffmpeg is available if raspivid is.
-        logging.warning("Legacy raspivid found. Trying ffmpeg wrapper...")
-        cmd = ["ffmpeg", "-f", "video4linux2", "-i", "/dev/video0", "-f", "mjpeg", "-framerate", str(FRAMERATE), "-video_size", f"{WIDTH}x{HEIGHT}", "-"]
+    else:
+        # USB camera via ffmpeg - auto-detect device
+        dev = find_usb_camera()
+        logging.info(f"Using USB camera: {dev}")
+        cmd = ["ffmpeg", "-f", "video4linux2", "-i", dev, "-f", "mjpeg", "-framerate", str(FRAMERATE), "-video_size", f"{WIDTH}x{HEIGHT}", "-"]
     
     return cmd
 
+def run_capture_loop(camera_proc, output):
+    """Read MJPEG frames from camera process. Returns when process dies."""
+    import time
+    stream = camera_proc.stdout
+    data = b''
+    frame_count = 0
+    last_log = time.time()
+    while True:
+        if camera_proc.poll() is not None:
+            logging.error("Camera process exited unexpectedly.")
+            return
+        chunk = stream.read(4096)
+        if not chunk:
+            return
+        data += chunk
+        while True:
+            start = data.find(b'\xff\xd8')
+            if start == -1:
+                if len(data) > 2:
+                    data = data[-2:]
+                break
+            end = data.find(b'\xff\xd9', start)
+            if end == -1:
+                data = data[start:]
+                break
+            jpg = data[start:end+2]
+            data = data[end+2:]
+            output.set_frame(jpg)
+            frame_count += 1
+            if time.time() - last_log > 5:
+                logging.info(f"Captured {frame_count} frames so far...")
+                last_log = time.time()
+
+
 if __name__ == '__main__':
+    import threading
+    import time
+
     logging.basicConfig(level=logging.INFO)
-    
+
     cmd = get_camera_command()
     if not cmd:
         logging.error("No compatible camera tool found.")
         exit(1)
-        
-    logging.info(f"Starting camera with command: {' '.join(cmd)}")
-    
-    try:
-        # Start camera process
-        # Changed stderr to PIPE to capture errors
-        camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
-        
-        # Start a thread to read from camera stdout and write to StreamingOutput
-        # Actually, we can just do it in a loop here if we use threading for the server.
-        import threading
-        import time
-        
-        def log_stderr():
-            for line in camera_proc.stderr:
-                logging.error(f"Camera Error: {line.decode('utf-8').strip()}")
 
-        def capture_loop():
-            # This is a simplified MJPEG parser. 
-            # rpicam-vid outputting MJPEG simply dumps JPEGs one after another.
-            # We need to find the JPEG boundaries (FF D8 ... FF D9).
-            
-            stream = camera_proc.stdout
-            
-            # Simple buffer strategy
-            # JPEG start: 0xFF 0xD8
-            # JPEG end: 0xFF 0xD9
-            
-            data = b''
-            frame_count = 0
-            last_log = time.time()
-            
-            while True:
-                # Check if process died
-                if camera_proc.poll() is not None:
-                    logging.error("Camera process exited unexpectedly.")
-                    break
-                    
-                # Read small chunks
-                chunk = stream.read(4096)
-                if not chunk:
-                    break
-                data += chunk
-                
-                while True:
-                    start = data.find(b'\xff\xd8')
-                    if start == -1:
-                        # No start marker. Keep last few bytes in case marker is split.
-                        if len(data) > 2:
-                            data = data[-2:]
-                        break
-                        
-                    end = data.find(b'\xff\xd9', start)
-                    if end == -1:
-                        # Start found but no end. Keep data starting from start marker.
-                        data = data[start:]
-                        break
-                    
-                    # Found full frame
-                    jpg = data[start:end+2]
-                    data = data[end+2:]
-                    
-                    output.set_frame(jpg)
-                    frame_count += 1
-                    
-                    if time.time() - last_log > 5:
-                        logging.info(f"Captured {frame_count} frames so far...")
-                        last_log = time.time()
-        
-        # Start stderr logger
-        t_err = threading.Thread(target=log_stderr)
-        t_err.daemon = True
-        t_err.start()
-        
-        # Start capture loop
-        t = threading.Thread(target=capture_loop)
-        t.daemon = True
-        t.start()
-        
+    logging.info(f"Starting camera with command: {' '.join(cmd)}")
+
+    camera_proc = None
+    capture_done = threading.Event()
+
+    def capture_with_restart():
+        nonlocal camera_proc
+        while not capture_done.is_set():
+            camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+
+            def log_stderr():
+                for line in camera_proc.stderr:
+                    logging.error(f"Camera: {line.decode('utf-8', errors='replace').strip()}")
+
+            threading.Thread(target=log_stderr, daemon=True).start()
+            run_capture_loop(camera_proc, output)
+            if camera_proc:
+                camera_proc.terminate()
+                camera_proc = None
+            if not capture_done.is_set():
+                logging.warning(f"Camera stopped. Reconnecting in {RECONNECT_DELAY}s...")
+                time.sleep(RECONNECT_DELAY)
+
+    t_capture = threading.Thread(target=capture_with_restart, daemon=True)
+    t_capture.start()
+
+    try:
         address = ('', PORT)
         server = StreamingServer(address, StreamingHandler)
         logging.info(f"Streaming at http://<IP>:{PORT}/stream.mjpg")
         server.serve_forever()
-        
     except KeyboardInterrupt:
         pass
     finally:
-        camera_proc.terminate()
+        capture_done.set()
+        if camera_proc:
+            camera_proc.terminate()
 

@@ -40,21 +40,19 @@ node_modules/
 
 # Build outputs
 dist/
-<<<<<<< HEAD
 bin/
 
 # Object files
 *.o
 *.obj
 
-
 # SQLite database files
 *.db
 sensor_data.db
-=======
 build/
->>>>>>> 01cb287a9e697e9da8227d833f491846421f9309
 
 # OrcaSlicer Files
 *.3mf
 
+# Solidworks Files
+*.SLDPRT
