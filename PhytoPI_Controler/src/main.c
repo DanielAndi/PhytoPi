@@ -288,11 +288,9 @@ int main()
     // State variables for Deadband/Heartbeat logic
     int last_soil_moisture = -999;
     int last_water_level = -999;
-    int last_light_level = -999;
 
     time_t last_soil_ts = 0;  // Last time soil moisture was sent
     time_t last_water_ts = 0; // Last time water level was sent
-    time_t last_light_ts = 0; // Last time light level was sent
 
     // Initialize the database — use writable path to avoid "readonly database" errors.
     // PHYTOPI_DB_PATH overrides; else /var/lib/phytopi (systemd) or ~/.phytopi (manual run).
@@ -365,7 +363,6 @@ int main()
     // SQL insert statements
     char sql_soil_moisture[256] = "INSERT INTO soil_moisture_data (humidity, timestamp) VALUES (?, ?);";
     char sql_water_level[256] = "INSERT INTO water_level_data (has_water, timestamp) VALUES (?, ?);";
-    char sql_light_level[256] = "INSERT INTO light_level_data (light_level, timestamp) VALUES (?, ?);";
     char sql_water_photo[256] = "INSERT INTO water_level_photoelectric (frequency_hz, timestamp) VALUES (?, ?);";
 
     time_t last_sync = time(NULL);
@@ -405,9 +402,9 @@ int main()
 
     while (1)
     {
-        soil_moisture = (fd >= 0) ? read_ads7830_channel(fd, 0) : -1;  /* ADS7830 Ch0 */
+        soil_moisture = (fd >= 0) ? read_pcf8591_channel(fd, 0) : -1;  /* pcf8591 Ch0 */
         water_level   = -1;  /* No legacy analog water sensor; use photoelectric (Photo Hz) */
-        light_level   = (fd >= 0) ? read_ads7830_channel(fd, 1) : -1;  /* ADS7830 Ch1 */
+        light_level   = -1; /* No legacy analog light sensor */
 
         time_t now = time(NULL);
 
@@ -539,20 +536,7 @@ int main()
             }
         }
 
-        // 4. Check Light Level
-        if (light_level != -1) {
-            if (abs(light_level - last_light_level) >= THRESH_LIGHT ||
-                (now - last_light_ts) >= HEARTBEAT_INTERVAL)
-            {
-                if (sql_execute_insert(db, sql_light_level, light_level, 0, timestamp) == SQLITE_OK) {
-                    printf("  -> Saved Light (Val: %d->%d)\n", last_light_level, light_level);
-                    last_light_level = light_level;
-                    last_light_ts = now;
-                }
-            }
-        }
-
-        // 5. Photoelectric water level (5-state with hysteresis)
+        // 4. Photoelectric water level (5-state with hysteresis)
         static int last_photo_freq = -999;
         static int last_water_state = -1;
         static time_t last_photo_ts = 0;
