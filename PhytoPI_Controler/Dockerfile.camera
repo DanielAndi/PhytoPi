@@ -1,0 +1,20 @@
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      python3 \
+      python3-pip \
+      ffmpeg \
+      libraspberrypi-bin \
+      libcamera-apps \
+      v4l-utils \
+      && rm -rf /var/lib/apt/lists/*
+
+COPY scripts/stream_camera_web.py /app/stream_camera_web.py
+
+EXPOSE 8000
+
+CMD ["python3", "/app/stream_camera_web.py"]
+
