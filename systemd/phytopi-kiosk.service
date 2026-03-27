@@ -1,0 +1,16 @@
+[Unit]
+Description=PhytoPi UI Kiosk
+After=graphical.target docker-compose-phytopi.service
+Requires=docker-compose-phytopi.service
+
+[Service]
+User=pi
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/pi/.Xauthority
+Type=simple
+ExecStart=/usr/bin/chromium-browser --noerrdialogs --kiosk http://localhost:8080 --incognito --disable-translate --disable-infobars
+Restart=on-failure
+
+[Install]
+WantedBy=graphical.target
+

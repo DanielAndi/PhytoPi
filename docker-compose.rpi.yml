@@ -1,0 +1,113 @@
+version: "3.9"
+
+services:
+  # Core sensor/actuator loop compiled from PhytoPI_Controler C code
+  sensors:
+    build:
+      context: .
+      dockerfile: ./PhytoPI_Controler/Dockerfile.sensors
+    container_name: phytopi-sensors
+    restart: unless-stopped
+    privileged: true
+    environment:
+      # Supabase + device identity (provided per-device)
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_DEVICE_ID: ${SUPABASE_DEVICE_ID}
+      SUPABASE_HUMIDITY_SENSOR_ID: ${SUPABASE_HUMIDITY_SENSOR_ID}
+      SUPABASE_TEMPERATURE_SENSOR_ID: ${SUPABASE_TEMPERATURE_SENSOR_ID}
+      SUPABASE_SOIL_MOISTURE_SENSOR_ID: ${SUPABASE_SOIL_MOISTURE_SENSOR_ID}
+      SUPABASE_WATER_LEVEL_SENSOR_ID: ${SUPABASE_WATER_LEVEL_SENSOR_ID}
+      SUPABASE_LIGHT_SENSOR_ID: ${SUPABASE_LIGHT_SENSOR_ID}
+      SUPABASE_PRESSURE_SENSOR_ID: ${SUPABASE_PRESSURE_SENSOR_ID}
+      SUPABASE_GAS_SENSOR_ID: ${SUPABASE_GAS_SENSOR_ID}
+      SUPABASE_WATER_LEVEL_PHOTOELECTRIC_SENSOR_ID: ${SUPABASE_WATER_LEVEL_PHOTOELECTRIC_SENSOR_ID}
+      PHYTOPI_DB_PATH: /data/sensor_data.db
+      CAPTURE_SCRIPT_PATH: /app/scripts/capture_and_upload.py
+    volumes:
+      # Persistent database/log storage
+      - phytopi-data:/data
+      # Access to I2C, GPIO, etc. (tuned as needed)
+      - /dev:/dev
+      - /sys:/sys
+    networks:
+      - phyto-net
+
+  # Web UI served via simple HTTP server
+  ui:
+    build:
+      context: ./User_Interface
+      dockerfile: ./Dockerfile.ui
+    container_name: phytopi-ui
+    restart: unless-stopped
+    depends_on:
+      - sensors
+    ports:
+      # Expose to LAN; kiosk browser on Pi can also use this
+      - "8080:80"
+    networks:
+      - phyto-net
+
+  # MJPEG camera streaming service
+  camera:
+    build:
+      context: ./PhytoPI_Controler
+      dockerfile: ./Dockerfile.camera
+    container_name: phytopi-camera
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - "/dev/video0:/dev/video0"
+    ports:
+      - "8000:8000"
+    networks:
+      - phyto-net
+
+  # AI worker (usually runs off-device; optional on Pi if resources allow)
+  ai:
+    build:
+      context: ./PhytoPI_Controler
+      dockerfile: ./Dockerfile.ai
+    container_name: phytopi-ai
+    restart: unless-stopped
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-moondream:1.8b}
+      PLANTNET_API_KEY: ${PLANTNET_API_KEY}
+      PLANTNET_CONFIDENCE_THRESHOLD: ${PLANTNET_CONFIDENCE_THRESHOLD:-0.20}
+    networks:
+      - phyto-net
+
+  # Self-updating container that keeps the stack in sync with registry images
+  updater:
+    build:
+      context: .
+      dockerfile: ./docker/updater/Dockerfile
+    container_name: phytopi-updater
+    restart: unless-stopped
+    environment:
+      COMPOSE_FILE: /opt/phyto/docker-compose.rpi.yml
+      COMPOSE_PROJECT_NAME: phytopi
+      UPDATE_INTERVAL_SECONDS: ${UPDATE_INTERVAL_SECONDS:-600}
+      DOCKER_COMPOSE_CMD: "docker compose"
+      # Optional auth – use docker login on host, or pass registry creds as needed
+      # REGISTRY_USERNAME: ${REGISTRY_USERNAME}
+      # REGISTRY_PASSWORD: ${REGISTRY_PASSWORD}
+    volumes:
+      # Allow updater to manage local Docker (least-privilege: only this service sees the socket)
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount compose file path expected by updater
+      - ./:/opt/phyto:ro
+    networks:
+      - phyto-net
+
+networks:
+  phyto-net:
+    driver: bridge
+
+volumes:
+  phytopi-data:
+    driver: local
+

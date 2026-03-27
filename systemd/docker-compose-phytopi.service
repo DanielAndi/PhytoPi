@@ -1,0 +1,19 @@
+[Unit]
+Description=PhytoPi Docker stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/phyto
+RemainAfterExit=yes
+Environment=COMPOSE_FILE=/opt/phyto/docker-compose.rpi.yml
+Environment=COMPOSE_PROJECT_NAME=phytopi
+ExecStart=/usr/bin/docker compose -p phytopi -f /opt/phyto/docker-compose.rpi.yml up -d
+ExecStop=/usr/bin/docker compose -p phytopi -f /opt/phyto/docker-compose.rpi.yml down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+
