@@ -1,0 +1,10 @@
+[Unit]
+Description=Run PhytoPi auto-update every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Unit=phytopi-updater.service
+
+[Install]
+WantedBy=timers.target

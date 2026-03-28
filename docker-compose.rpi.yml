@@ -4,8 +4,8 @@ services:
   # Core sensor/actuator loop compiled from PhytoPI_Controler C code
   sensors:
     build:
-      context: .
-      dockerfile: ./PhytoPI_Controler/Dockerfile.sensors
+      context: ./PhytoPI_Controler
+      dockerfile: ./Dockerfile.sensors
     container_name: phytopi-sensors
     restart: unless-stopped
     privileged: true
@@ -33,18 +33,23 @@ services:
     networks:
       - phyto-net
 
-  # Web UI served via simple HTTP server
+  # Native Flutter Linux kiosk UI
   ui:
     build:
       context: ./User_Interface
       dockerfile: ./Dockerfile.ui
     container_name: phytopi-ui
     restart: unless-stopped
-    depends_on:
-      - sensors
-    ports:
-      # Expose to LAN; kiosk browser on Pi can also use this
-      - "8080:80"
+    environment:
+      DISPLAY: ":0"
+    volumes:
+      # Mount the pre-built Flutter Linux bundle from the host; the entrypoint
+      # watches the binary with inotifywait and auto-restarts on 'flutter build linux'.
+      - ./User_Interface/build/linux/arm64/release/bundle:/app/bundle:ro
+      # Share the host X11 socket so the GUI appears on the connected display
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    devices:
+      - /dev/dri:/dev/dri
     networks:
       - phyto-net
 
@@ -83,8 +88,8 @@ services:
   # Self-updating container that keeps the stack in sync with registry images
   updater:
     build:
-      context: .
-      dockerfile: ./docker/updater/Dockerfile
+      context: ./docker/updater
+      dockerfile: ./Dockerfile
     container_name: phytopi-updater
     restart: unless-stopped
     environment:

@@ -1,15 +1,15 @@
 [Unit]
 Description=PhytoPi UI Kiosk
+# The Flutter Linux UI now runs inside the phytopi-ui Docker container which
+# shares the host X11 socket (DISPLAY=:0).  No Chromium needed.
 After=graphical.target docker-compose-phytopi.service
 Requires=docker-compose-phytopi.service
 
 [Service]
-User=pi
-Environment=DISPLAY=:0
-Environment=XAUTHORITY=/home/pi/.Xauthority
-Type=simple
-ExecStart=/usr/bin/chromium-browser --noerrdialogs --kiosk http://localhost:8080 --incognito --disable-translate --disable-infobars
-Restart=on-failure
+# No-op: the ui container started by docker-compose-phytopi.service handles the display.
+Type=oneshot
+ExecStart=/bin/true
+RemainAfterExit=yes
 
 [Install]
 WantedBy=graphical.target
