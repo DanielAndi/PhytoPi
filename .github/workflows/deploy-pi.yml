@@ -47,9 +47,8 @@ jobs:
           host: phytopi        # Tailscale MagicDNS hostname
           username: phytopi
           key: ${{ secrets.PI_SSH_PRIVATE_KEY }}
-          script_stop: true
-          # Run the update script; it git-pulls, detects what changed, rebuilds selectively
           script: |
+            set -e
             cd /home/phytopi/PhytoPi
             bash scripts/update.sh
 
