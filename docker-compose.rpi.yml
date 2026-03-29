@@ -23,7 +23,7 @@ services:
       SUPABASE_GAS_SENSOR_ID: ${SUPABASE_GAS_SENSOR_ID}
       SUPABASE_WATER_LEVEL_PHOTOELECTRIC_SENSOR_ID: ${SUPABASE_WATER_LEVEL_PHOTOELECTRIC_SENSOR_ID}
       PHYTOPI_DB_PATH: /data/sensor_data.db
-      CAPTURE_SCRIPT_PATH: /app/scripts/capture_and_upload.py
+      CAPTURE_SCRIPT_PATH: /app/PhytoPI_Controler/scripts/capture_and_upload.py
     volumes:
       # Persistent database/log storage
       - phytopi-data:/data

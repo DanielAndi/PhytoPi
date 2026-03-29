@@ -32,6 +32,9 @@ WORKDIR /app/PhytoPI_Controler
 
 RUN make clean && make
 
+# Install Python deps needed by capture_and_upload.py (supabase client)
+RUN pip3 install --break-system-packages supabase
+
 VOLUME ["/data"]
 
 ENV PHYTOPI_DB_PATH=/data/sensor_data.db
