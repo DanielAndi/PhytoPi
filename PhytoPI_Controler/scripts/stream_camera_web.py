@@ -99,20 +99,33 @@ def find_usb_camera():
             return d
     return devices[0]
 
+def _libcamera_has_cameras(binary: str) -> bool:
+    """Return True only if the given binary is present AND libcamera can enumerate at least one camera."""
+    if subprocess.call(f"command -v {binary}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+        return False
+    result = subprocess.run(
+        [binary, "--list-cameras"],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5
+    )
+    output = result.stdout.decode(errors="replace")
+    # libcamera prints "No cameras available" when none are found
+    return "No cameras available" not in output and "Available cameras" in output
+
 def get_camera_command():
-    # Check for rpicam-vid (Bookworm) or libcamera-vid (Bullseye) - Pi camera
-    cmd = None
-    if subprocess.call("command -v rpicam-vid", shell=True, stdout=subprocess.DEVNULL) == 0:
-        cmd = ["rpicam-vid", "-t", "0", "--width", str(WIDTH), "--height", str(HEIGHT), "--framerate", str(FRAMERATE), "--codec", "mjpeg", "--nopreview", "-o", "-"]
-    elif subprocess.call("command -v libcamera-vid", shell=True, stdout=subprocess.DEVNULL) == 0:
-        cmd = ["libcamera-vid", "-t", "0", "--width", str(WIDTH), "--height", str(HEIGHT), "--framerate", str(FRAMERATE), "--codec", "mjpeg", "--nopreview", "-o", "-"]
-    else:
-        # USB camera via ffmpeg - auto-detect device
-        dev = find_usb_camera()
-        logging.info(f"Using USB camera: {dev}")
-        cmd = ["ffmpeg", "-f", "video4linux2", "-i", dev, "-f", "mjpeg", "-framerate", str(FRAMERATE), "-video_size", f"{WIDTH}x{HEIGHT}", "-"]
-    
-    return cmd
+    # Prefer rpicam-vid / libcamera-vid only when a CSI camera is actually present.
+    # Falls back to ffmpeg for USB webcams.
+    for binary in ("rpicam-vid", "libcamera-vid"):
+        if _libcamera_has_cameras(binary):
+            logging.info(f"CSI camera detected, using {binary}")
+            return [binary, "-t", "0", "--width", str(WIDTH), "--height", str(HEIGHT),
+                    "--framerate", str(FRAMERATE), "--codec", "mjpeg", "--nopreview", "-o", "-"]
+
+    # USB camera via ffmpeg
+    dev = find_usb_camera()
+    logging.info(f"No CSI camera found; using USB camera via ffmpeg: {dev}")
+    return ["ffmpeg", "-f", "video4linux2", "-i", dev,
+            "-vf", f"scale={WIDTH}:{HEIGHT}",
+            "-f", "mjpeg", "-q:v", "5", "-r", str(FRAMERATE), "-"]
 
 def run_capture_loop(camera_proc, output):
     """Read MJPEG frames from camera process. Returns when process dies."""
@@ -165,7 +178,7 @@ if __name__ == '__main__':
     capture_done = threading.Event()
 
     def capture_with_restart():
-        nonlocal camera_proc
+        global camera_proc
         while not capture_done.is_set():
             camera_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
 

@@ -34,20 +34,24 @@ services:
       - phyto-net
 
   # Native Flutter Linux kiosk UI
+  # NOTE: The UI runs natively on the host via systemd/phytopi-ui.service
+  # (Docker cannot reliably access the host X11 display due to auth cookie scoping).
+  # This service definition is kept for reference but has profiles: [disabled]
+  # so it is NOT started by 'docker compose up'.
   ui:
     build:
       context: ./User_Interface
       dockerfile: ./Dockerfile.ui
     container_name: phytopi-ui
+    profiles: [disabled]
     restart: unless-stopped
     environment:
       DISPLAY: ":0"
+      XAUTHORITY: /root/.Xauthority
     volumes:
-      # Mount the pre-built Flutter Linux bundle from the host; the entrypoint
-      # watches the binary with inotifywait and auto-restarts on 'flutter build linux'.
       - ./User_Interface/build/linux/arm64/release/bundle:/app/bundle:ro
-      # Share the host X11 socket so the GUI appears on the connected display
       - /tmp/.X11-unix:/tmp/.X11-unix
+      - /home/phytopi/.Xauthority:/root/.Xauthority:ro
     devices:
       - /dev/dri:/dev/dri
     networks:
@@ -63,25 +67,13 @@ services:
     privileged: true
     devices:
       - "/dev/video0:/dev/video0"
+      - "/dev/video1:/dev/video1"
+      - "/dev/media0:/dev/media0"
+      - "/dev/media1:/dev/media1"
+      - "/dev/media2:/dev/media2"
+      - "/dev/media3:/dev/media3"
     ports:
       - "8000:8000"
-    networks:
-      - phyto-net
-
-  # AI worker (usually runs off-device; optional on Pi if resources allow)
-  ai:
-    build:
-      context: ./PhytoPI_Controler
-      dockerfile: ./Dockerfile.ai
-    container_name: phytopi-ai
-    restart: unless-stopped
-    environment:
-      SUPABASE_URL: ${SUPABASE_URL}
-      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-moondream:1.8b}
-      PLANTNET_API_KEY: ${PLANTNET_API_KEY}
-      PLANTNET_CONFIDENCE_THRESHOLD: ${PLANTNET_CONFIDENCE_THRESHOLD:-0.20}
     networks:
       - phyto-net
 

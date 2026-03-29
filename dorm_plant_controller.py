@@ -18,7 +18,7 @@ DRY_THRESHOLD = 130   # Above this → trigger a water pulse
 WET_THRESHOLD = 95    # Below this → soil is sufficiently moist, don't water
 
 # --- Temperature threshold for enclosure fan ---
-VENT_FAN_TEMP_F = 83.0  # Turn on enclosure vent fan at or above this temp (F)
+VENT_FAN_HUM = 85.0  # Turn on enclosure vent fan at or above this humidity (%)
 
 # --- Pump timing ---
 PULSE_DURATION = 10.0   # seconds per pulse (~28ml at 2.86ml/s)
@@ -138,14 +138,14 @@ def main():
                         print(f"Temp: {temp_f:.1f}F  Humidity: {humidity:.1f}%RH")
 
                         # Vent fan control
-                        if temp_f >= VENT_FAN_TEMP_F and not vent_fan_on:
+                        if temp_f >= VENT_FAN_HUM and not vent_fan_on:
                             GPIO.output(FAN_VENT_PIN, GPIO.HIGH)
                             vent_fan_on = True
-                            print(f"  Vent fan ON ({temp_f:.1f}F >= {VENT_FAN_TEMP_F}F)")
-                        elif temp_f < VENT_FAN_TEMP_F and vent_fan_on:
+                            print(f"  Vent fan ON ({temp_f:.1f}F >= {VENT_FAN_HUM}F)")
+                        elif temp_f < VENT_FAN_HUM and vent_fan_on:
                             GPIO.output(FAN_VENT_PIN, GPIO.LOW)
                             vent_fan_on = False
-                            print(f"  Vent fan OFF ({temp_f:.1f}F < {VENT_FAN_TEMP_F}F)")
+                            print(f"  Vent fan OFF ({temp_f:.1f}F < {VENT_FAN_HUM}F)")
 
             # --- Soil moisture check ---
             if (now - last_soil_check) >= SOIL_CHECK_INTERVAL:
