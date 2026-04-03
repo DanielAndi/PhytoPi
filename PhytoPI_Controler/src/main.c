@@ -298,10 +298,9 @@ int main()
         fprintf(stderr, "To enable I2C: sudo raspi-config -> Interface Options -> I2C -> Enable\n");
     }
 
-    // Variables to hold sensor data (temp/humidity from BME680, not DHT11)
+    // Variables to hold sensor data (temp/humidity from BME680)
     int soil_moisture = 0;
     int water_level = 0;
-    // light_level removed — no analog light sensor connected
 
     // State variables for Deadband/Heartbeat logic
     int last_soil_moisture = -999;
@@ -387,11 +386,6 @@ int main()
     time_t last_command_poll = time(NULL);
     time_t last_threshold_fetch = 0;
     time_t last_schedule_fetch = 0;
-    time_t light_cycle_start = time(NULL);
-    time_t last_soil_control_check = 0;
-    time_t last_pump_pulse = 0;
-    time_t last_dorm_bme_control_check = 0;
-    int vent_fan_on = 0;
 
     /* Cached thresholds — fetched from Supabase every 60s, evaluated every loop iteration */
     device_threshold_t *cached_thresholds = NULL;
@@ -420,25 +414,6 @@ int main()
 
     if (!bme680_ok)
         fprintf(stderr, "Warning: BME680 init failed. Temp/humidity/pressure/gas readings disabled.\n");
-
-    /* Initialize actuators with the same baseline behavior as dorm controller. */
-    if (lights_init() == 0 && lights_set(1) == 0)
-    {
-        lights_on = 1;
-        light_cycle_start = time(NULL);
-        lights_off_at = 0;
-        printf("Dorm config: Lights ON - %dh light period\n", DORM_LIGHT_ON_HOURS);
-    }
-    if (pump_init() != 0)
-        fprintf(stderr, "Dorm config: pump_init() failed, auto-watering disabled\n");
-    if (fans_init() == 0)
-    {
-        fans_set_speed(1, DORM_ELEC_FAN_DUTY); /* Electronics fan always on */
-        fans_set_speed(2, 0);                  /* Vent fan starts off */
-        printf("Dorm config: Electronics fan ON (fan1)\n");
-    }
-
-    printf("Starting sensor loop (Interval: %ds, Heartbeat: %ds)\n", DATA_READ_INTERVAL, HEARTBEAT_INTERVAL);
 
     while (1)
     {
@@ -477,29 +452,6 @@ int main()
             }
         }
 
-        /* Dorm parity: temperature-based vent fan control on fan2 every 30s. */
-        if (bme680_ok && bme_temp > -900 && (now - last_dorm_bme_control_check) >= DORM_BME_CHECK_INTERVAL)
-        {
-            last_dorm_bme_control_check = now;
-            if (fans_init() == 0)
-            {
-                /* Keep electronics fan (fan1) always on. */
-                fans_set_speed(1, DORM_ELEC_FAN_DUTY);
-                if (bme_temp >= DORM_VENT_FAN_TEMP_C && !vent_fan_on)
-                {
-                    fans_set_speed(2, DORM_VENT_FAN_DUTY);
-                    vent_fan_on = 1;
-                    printf("  -> Vent fan ON (%.1fC >= %.1fC)\n", bme_temp, DORM_VENT_FAN_TEMP_C);
-                }
-                else if (bme_temp < DORM_VENT_FAN_TEMP_C && vent_fan_on)
-                {
-                    fans_set_speed(2, 0);
-                    vent_fan_on = 0;
-                    printf("  -> Vent fan OFF (%.1fC < %.1fC)\n", bme_temp, DORM_VENT_FAN_TEMP_C);
-                }
-            }
-        }
-
         // Photoelectric water level (every 2nd iteration to avoid blocking)
         int photo_freq = -1;
         if (iteration % 2 == 0)
@@ -518,99 +470,6 @@ int main()
                 last_photo_alert = now;
         }
 
-        /* Dorm parity: autonomous 14h/10h light cycle. */
-        {
-            time_t cycle_elapsed = now - light_cycle_start;
-            if (lights_on && cycle_elapsed >= DORM_LIGHT_ON_SECS)
-            {
-                if (lights_init() == 0 && lights_set(0) == 0)
-                {
-                    lights_on = 0;
-                    light_cycle_start = now;
-                    lights_off_at = 0;
-                    printf("  -> Dorm light cycle: Lights OFF (%dh dark period)\n", DORM_LIGHT_OFF_HOURS);
-                }
-            }
-            else if (!lights_on && cycle_elapsed >= DORM_LIGHT_OFF_SECS)
-            {
-                if (lights_init() == 0 && lights_set(1) == 0)
-                {
-                    lights_on = 1;
-                    light_cycle_start = now;
-                    lights_off_at = 0;
-                    printf("  -> Dorm light cycle: Lights ON (%dh light period)\n", DORM_LIGHT_ON_HOURS);
-                }
-            }
-        }
-
-        /* Lights timeout: auto-off when duration_sec elapsed */
-        if (lights_on && lights_off_at && now >= lights_off_at)
-        {
-            lights_set(0);
-            lights_on = 0;
-            lights_off_at = 0;
-            printf("  -> Lights auto-off (timeout)\n");
-        }
-
-        /* Pump timeout: auto-off when duration_sec elapsed */
-        if (pump_on && pump_off_at && now >= pump_off_at)
-        {
-            pump_set(0);
-            pump_on = 0;
-            pump_off_at = 0;
-            printf("  -> Pump auto-off (timeout)\n");
-        }
-
-        /* Ventilation timeout: auto-off fans when run_ventilation duration elapsed */
-        if (ventilation_off_at && now >= ventilation_off_at)
-        {
-            if (fans_init() == 0)
-            {
-                fans_set_both(0);
-                fans_set_speed(1, DORM_ELEC_FAN_DUTY); /* Restore dorm baseline */
-            }
-            ventilation_off_at = 0;
-            printf("  -> Ventilation auto-off (timeout)\n");
-        }
-
-        /* Dorm parity: soil-driven watering pulses with cooldown. */
-        if (soil_moisture >= 0 && (now - last_soil_control_check) >= DORM_SOIL_CHECK_INTERVAL)
-        {
-            last_soil_control_check = now;
-            printf("  -> Soil control check: %d (dry>%d, wet<%d)\n",
-                   soil_moisture, DORM_DRY_THRESHOLD, DORM_WET_THRESHOLD);
-            if (soil_moisture > DORM_DRY_THRESHOLD)
-            {
-                if ((now - last_pump_pulse) >= DORM_PUMP_COOLDOWN_SEC)
-                {
-                    if (pump_init() == 0 && pump_set(1) == 0)
-                    {
-                        pump_on = 1;
-                        printf("  -> Soil dry (%d), watering for %ds\n", soil_moisture, DORM_PUMP_PULSE_SEC);
-                        sleep(DORM_PUMP_PULSE_SEC);
-                        pump_set(0);
-                        pump_on = 0;
-                        last_pump_pulse = time(NULL);
-                        pump_off_at = 0;
-                        printf("  -> Pump pulse complete\n");
-                    }
-                }
-                else
-                {
-                    int remaining = (int)(DORM_PUMP_COOLDOWN_SEC - (now - last_pump_pulse));
-                    if (remaining < 0) remaining = 0;
-                    printf("  -> Soil dry but cooldown active (%ds remaining)\n", remaining);
-                }
-            }
-            else if (soil_moisture < DORM_WET_THRESHOLD)
-            {
-                printf("  -> Soil sufficiently moist (%d), no watering needed\n", soil_moisture);
-            }
-            else
-            {
-                printf("  -> Soil in acceptable range (%d)\n", soil_moisture);
-            }
-        }
 
         printf("[%ld] L=%d Pump=%d T=%.1fC H=%.1f%% Press=%.1f hPa G=%.1f Soil=%d Photo=%dHz\n",
                now, lights_on, pump_on, bme_temp, bme_hum, bme_pressure, bme_gas, soil_moisture, photo_freq);

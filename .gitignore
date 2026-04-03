@@ -57,3 +57,5 @@ build/
 # Solidworks Files
 *.SLDPRT
 *.SLDASM
+
+*.cursor
