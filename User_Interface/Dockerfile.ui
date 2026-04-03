@@ -1,0 +1,19 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libgtk-3-0 \
+      libglib2.0-0 \
+      libpangocairo-1.0-0 \
+      libgdk-pixbuf-2.0-0 \
+      libatk1.0-0 \
+      libcairo2 \
+      inotify-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY docker-entrypoint-ui.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+WORKDIR /app/bundle
+
+ENTRYPOINT ["/entrypoint.sh"]
+

@@ -14,12 +14,12 @@ int main() {
         return 1;
     }
 
-    printf("Reading ADS7830 Channel %d. Press Ctrl+C to exit.\n", channel);
+    printf("Reading PCF8591 Channel %d. Press Ctrl+C to exit.\n", channel);
     
     while (1) {
-        int val = read_ads7830_channel(fd, channel);
+        int val = read_pcf8591_channel(fd, channel);
         if (val < 0) {
-            fprintf(stderr, "Error reading ADS7830\n");
+            fprintf(stderr, "Error reading PCF8591\n");
         } else {
             printf("Photoresistor Value (Light Intensity): %d/255\n", val);
         }

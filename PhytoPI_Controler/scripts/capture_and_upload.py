@@ -31,6 +31,34 @@ def find_usb_camera():
     return devices[0]
 
 
+def capture_from_mjpeg_stream(out_path: Path) -> bool:
+    """Grab one JPEG frame from the phytopi-camera MJPEG stream (same Docker network)."""
+    import urllib.request
+    url = os.environ.get("CAMERA_STREAM_URL", "http://phytopi-camera:8000/stream.mjpg")
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = b""
+            while True:
+                chunk = resp.read(4096)
+                if not chunk:
+                    break
+                data += chunk
+                start = data.find(b'\xff\xd8')
+                if start == -1:
+                    if len(data) > 2:
+                        data = data[-2:]
+                    continue
+                end = data.find(b'\xff\xd9', start)
+                if end == -1:
+                    data = data[start:]
+                    continue
+                out_path.write_bytes(data[start:end + 2])
+                return True
+    except Exception as e:
+        print(f"Stream capture failed ({url}): {e}", file=sys.stderr)
+    return False
+
+
 def capture_with_pi_camera(out_path: Path) -> bool:
     """Try rpicam-still (Bookworm) or libcamera-still (Bullseye). Returns True if capture succeeded."""
     for cmd_name in ("rpicam-still", "libcamera-still"):
@@ -78,13 +106,16 @@ def main():
     ts = int(time.time())
     out_path = Path(f"/tmp/phytopi_capture_{ts}.jpg")
 
-    # Try Pi camera (rpicam-still / libcamera-still) first, then USB camera via ffmpeg
-    if capture_with_pi_camera(out_path):
+    # Try MJPEG stream first (camera container on same Docker network),
+    # then fall back to direct Pi/USB camera access
+    if capture_from_mjpeg_stream(out_path):
+        pass  # success
+    elif capture_with_pi_camera(out_path):
         pass  # success
     elif capture_with_usb_camera(out_path):
         pass  # success
     else:
-        print("Capture failed: Pi camera and USB camera (ffmpeg) both failed or unavailable", file=sys.stderr)
+        print("Capture failed: MJPEG stream, Pi camera, and USB camera (ffmpeg) all unavailable", file=sys.stderr)
         sys.exit(2)
 
     if not out_path.exists():

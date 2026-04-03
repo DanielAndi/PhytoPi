@@ -56,3 +56,4 @@ build/
 
 # Solidworks Files
 *.SLDPRT
+*.SLDASM

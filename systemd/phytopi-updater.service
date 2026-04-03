@@ -1,0 +1,14 @@
+[Unit]
+Description=PhytoPi auto-update (git pull + selective rebuild)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=phytopi
+WorkingDirectory=/home/phytopi/PhytoPi
+Environment=PHYTO_DIR=/home/phytopi/PhytoPi
+Environment=FLUTTER_BIN=/home/phytopi/flutter/bin/flutter
+ExecStart=/home/phytopi/PhytoPi/scripts/update.sh
+StandardOutput=journal
+StandardError=journal

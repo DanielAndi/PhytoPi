@@ -17,14 +17,14 @@
 #include <fcntl.h>
 
 /* Pin assignments (BCM numbering) */
-#define WATER_LEVEL_PIN  26   /* Photoelectric water level sensor (frequency input) */
-#define LIGHTS_PIN       17   /* 24V MOSFET for grow lights */
-#define PUMP_PIN         22   /* Water pump MOSFET */
-#define FAN1_PWM_PIN     12   /* Hardware PWM0 - Fan 1 */
-#define FAN2_PWM_PIN     13   /* Hardware PWM1 - Fan 2 */
-#define DATA_READ_INTERVAL 2  /* In seconds */
-#define ADS7830_ADDR     0x4b /* Default 7-bit I2C address for ADS7830 */
-#define BME680_ADDR      0x76 /* BME680 I2C address (or 0x77) */
+#define WATER_LEVEL_PIN 26   /* Photoelectric water level sensor (frequency input) */
+#define LIGHTS_PIN 17        /* 24V MOSFET for grow lights */
+#define PUMP_PIN 22          /* Water pump MOSFET */
+#define FAN1_PWM_PIN 12      /* Hardware PWM0 - Fan 1 */
+#define FAN2_PWM_PIN 13      /* Hardware PWM1 - Fan 2 */
+#define DATA_READ_INTERVAL 2 /* In seconds */
+#define PCF8591_ADDR 0x48    /* Default 7-bit I2C address for PCF8591 */
+#define BME680_ADDR 0x76     /* BME680 I2C address (or 0x77) */
 
 /* GPIO function declarations */
 int gpio_init(int pin);
@@ -50,8 +50,8 @@ int fans_set_both(int duty_percent);
 /* Photoelectric water level - returns frequency (Hz), -1 on error. Low = low water */
 int read_photoelectric_water_level(int *frequency_hz);
 
-/* ADS7830 ADC */
+/* PCF8591 ADC */
 int i2c_init(const char *i2c_bus);
-int read_ads7830_channel(int fd, int channel);
+int read_pcf8591_channel(int fd, int channel);
 
 #endif

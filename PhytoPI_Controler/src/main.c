@@ -45,6 +45,21 @@
 // Force a recording every X seconds even if values haven't changed
 #define HEARTBEAT_INTERVAL 300 // 5 minutes
 
+/* Dorm controller baseline behavior parity */
+#define DORM_LIGHT_ON_HOURS 14
+#define DORM_LIGHT_OFF_HOURS 10
+#define DORM_LIGHT_ON_SECS (DORM_LIGHT_ON_HOURS * 3600)
+#define DORM_LIGHT_OFF_SECS (DORM_LIGHT_OFF_HOURS * 3600)
+#define DORM_SOIL_CHECK_INTERVAL 300
+#define DORM_DRY_THRESHOLD 130
+#define DORM_WET_THRESHOLD 95
+#define DORM_PUMP_PULSE_SEC 10
+#define DORM_PUMP_COOLDOWN_SEC 120
+#define DORM_BME_CHECK_INTERVAL 30
+#define DORM_VENT_FAN_TEMP_C 28.333f /* 83F */
+#define DORM_ELEC_FAN_DUTY 100
+#define DORM_VENT_FAN_DUTY 100
+
 // Sensor ID mapping - these should match your Supabase sensors table
 // Set via environment variables: SUPABASE_HUMIDITY_SENSOR_ID, etc.
 static char *humidity_sensor_id = NULL;
@@ -273,6 +288,9 @@ void sync_to_supabase(sqlite3 *db, supabase_config_t *supabase_cfg)
 
 int main()
 {
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+
     int fd = i2c_init("/dev/i2c-1"); // You need a FD to read from ADS7830 channels
     if (fd < 0)
     {
@@ -283,16 +301,14 @@ int main()
     // Variables to hold sensor data (temp/humidity from BME680, not DHT11)
     int soil_moisture = 0;
     int water_level = 0;
-    int light_level = 0;
+    // light_level removed — no analog light sensor connected
 
     // State variables for Deadband/Heartbeat logic
     int last_soil_moisture = -999;
     int last_water_level = -999;
-    int last_light_level = -999;
 
     time_t last_soil_ts = 0;  // Last time soil moisture was sent
     time_t last_water_ts = 0; // Last time water level was sent
-    time_t last_light_ts = 0; // Last time light level was sent
 
     // Initialize the database — use writable path to avoid "readonly database" errors.
     // PHYTOPI_DB_PATH overrides; else /var/lib/phytopi (systemd) or ~/.phytopi (manual run).
@@ -365,13 +381,17 @@ int main()
     // SQL insert statements
     char sql_soil_moisture[256] = "INSERT INTO soil_moisture_data (humidity, timestamp) VALUES (?, ?);";
     char sql_water_level[256] = "INSERT INTO water_level_data (has_water, timestamp) VALUES (?, ?);";
-    char sql_light_level[256] = "INSERT INTO light_level_data (light_level, timestamp) VALUES (?, ?);";
     char sql_water_photo[256] = "INSERT INTO water_level_photoelectric (frequency_hz, timestamp) VALUES (?, ?);";
 
     time_t last_sync = time(NULL);
     time_t last_command_poll = time(NULL);
     time_t last_threshold_fetch = 0;
     time_t last_schedule_fetch = 0;
+    time_t light_cycle_start = time(NULL);
+    time_t last_soil_control_check = 0;
+    time_t last_pump_pulse = 0;
+    time_t last_dorm_bme_control_check = 0;
+    int vent_fan_on = 0;
 
     /* Cached thresholds — fetched from Supabase every 60s, evaluated every loop iteration */
     device_threshold_t *cached_thresholds = NULL;
@@ -401,13 +421,30 @@ int main()
     if (!bme680_ok)
         fprintf(stderr, "Warning: BME680 init failed. Temp/humidity/pressure/gas readings disabled.\n");
 
+    /* Initialize actuators with the same baseline behavior as dorm controller. */
+    if (lights_init() == 0 && lights_set(1) == 0)
+    {
+        lights_on = 1;
+        light_cycle_start = time(NULL);
+        lights_off_at = 0;
+        printf("Dorm config: Lights ON - %dh light period\n", DORM_LIGHT_ON_HOURS);
+    }
+    if (pump_init() != 0)
+        fprintf(stderr, "Dorm config: pump_init() failed, auto-watering disabled\n");
+    if (fans_init() == 0)
+    {
+        fans_set_speed(1, DORM_ELEC_FAN_DUTY); /* Electronics fan always on */
+        fans_set_speed(2, 0);                  /* Vent fan starts off */
+        printf("Dorm config: Electronics fan ON (fan1)\n");
+    }
+
     printf("Starting sensor loop (Interval: %ds, Heartbeat: %ds)\n", DATA_READ_INTERVAL, HEARTBEAT_INTERVAL);
 
     while (1)
     {
-        soil_moisture = (fd >= 0) ? read_ads7830_channel(fd, 0) : -1;  /* ADS7830 Ch0 */
+        soil_moisture = (fd >= 0) ? read_pcf8591_channel(fd, 0) : -1;  /* pcf8591 Ch0 */
         water_level   = -1;  /* No legacy analog water sensor; use photoelectric (Photo Hz) */
-        light_level   = (fd >= 0) ? read_ads7830_channel(fd, 1) : -1;  /* ADS7830 Ch1 */
+        /* light_level: no analog light sensor connected */
 
         time_t now = time(NULL);
 
@@ -440,6 +477,29 @@ int main()
             }
         }
 
+        /* Dorm parity: temperature-based vent fan control on fan2 every 30s. */
+        if (bme680_ok && bme_temp > -900 && (now - last_dorm_bme_control_check) >= DORM_BME_CHECK_INTERVAL)
+        {
+            last_dorm_bme_control_check = now;
+            if (fans_init() == 0)
+            {
+                /* Keep electronics fan (fan1) always on. */
+                fans_set_speed(1, DORM_ELEC_FAN_DUTY);
+                if (bme_temp >= DORM_VENT_FAN_TEMP_C && !vent_fan_on)
+                {
+                    fans_set_speed(2, DORM_VENT_FAN_DUTY);
+                    vent_fan_on = 1;
+                    printf("  -> Vent fan ON (%.1fC >= %.1fC)\n", bme_temp, DORM_VENT_FAN_TEMP_C);
+                }
+                else if (bme_temp < DORM_VENT_FAN_TEMP_C && vent_fan_on)
+                {
+                    fans_set_speed(2, 0);
+                    vent_fan_on = 0;
+                    printf("  -> Vent fan OFF (%.1fC < %.1fC)\n", bme_temp, DORM_VENT_FAN_TEMP_C);
+                }
+            }
+        }
+
         // Photoelectric water level (every 2nd iteration to avoid blocking)
         int photo_freq = -1;
         if (iteration % 2 == 0)
@@ -456,6 +516,31 @@ int main()
                     "sensor_failure", "Photoelectric water level sensor unreachable",
                     "high", "automated") == 0)
                 last_photo_alert = now;
+        }
+
+        /* Dorm parity: autonomous 14h/10h light cycle. */
+        {
+            time_t cycle_elapsed = now - light_cycle_start;
+            if (lights_on && cycle_elapsed >= DORM_LIGHT_ON_SECS)
+            {
+                if (lights_init() == 0 && lights_set(0) == 0)
+                {
+                    lights_on = 0;
+                    light_cycle_start = now;
+                    lights_off_at = 0;
+                    printf("  -> Dorm light cycle: Lights OFF (%dh dark period)\n", DORM_LIGHT_OFF_HOURS);
+                }
+            }
+            else if (!lights_on && cycle_elapsed >= DORM_LIGHT_OFF_SECS)
+            {
+                if (lights_init() == 0 && lights_set(1) == 0)
+                {
+                    lights_on = 1;
+                    light_cycle_start = now;
+                    lights_off_at = 0;
+                    printf("  -> Dorm light cycle: Lights ON (%dh light period)\n", DORM_LIGHT_ON_HOURS);
+                }
+            }
         }
 
         /* Lights timeout: auto-off when duration_sec elapsed */
@@ -480,13 +565,55 @@ int main()
         if (ventilation_off_at && now >= ventilation_off_at)
         {
             if (fans_init() == 0)
+            {
                 fans_set_both(0);
+                fans_set_speed(1, DORM_ELEC_FAN_DUTY); /* Restore dorm baseline */
+            }
             ventilation_off_at = 0;
             printf("  -> Ventilation auto-off (timeout)\n");
         }
 
-        printf("[%ld] L=%d Pump=%d T=%.1fC H=%.1f%% Press=%.1f hPa G=%.1f Soil=%d Light=%d Photo=%dHz\n",
-               now, lights_on, pump_on, bme_temp, bme_hum, bme_pressure, bme_gas, soil_moisture, light_level, photo_freq);
+        /* Dorm parity: soil-driven watering pulses with cooldown. */
+        if (soil_moisture >= 0 && (now - last_soil_control_check) >= DORM_SOIL_CHECK_INTERVAL)
+        {
+            last_soil_control_check = now;
+            printf("  -> Soil control check: %d (dry>%d, wet<%d)\n",
+                   soil_moisture, DORM_DRY_THRESHOLD, DORM_WET_THRESHOLD);
+            if (soil_moisture > DORM_DRY_THRESHOLD)
+            {
+                if ((now - last_pump_pulse) >= DORM_PUMP_COOLDOWN_SEC)
+                {
+                    if (pump_init() == 0 && pump_set(1) == 0)
+                    {
+                        pump_on = 1;
+                        printf("  -> Soil dry (%d), watering for %ds\n", soil_moisture, DORM_PUMP_PULSE_SEC);
+                        sleep(DORM_PUMP_PULSE_SEC);
+                        pump_set(0);
+                        pump_on = 0;
+                        last_pump_pulse = time(NULL);
+                        pump_off_at = 0;
+                        printf("  -> Pump pulse complete\n");
+                    }
+                }
+                else
+                {
+                    int remaining = (int)(DORM_PUMP_COOLDOWN_SEC - (now - last_pump_pulse));
+                    if (remaining < 0) remaining = 0;
+                    printf("  -> Soil dry but cooldown active (%ds remaining)\n", remaining);
+                }
+            }
+            else if (soil_moisture < DORM_WET_THRESHOLD)
+            {
+                printf("  -> Soil sufficiently moist (%d), no watering needed\n", soil_moisture);
+            }
+            else
+            {
+                printf("  -> Soil in acceptable range (%d)\n", soil_moisture);
+            }
+        }
+
+        printf("[%ld] L=%d Pump=%d T=%.1fC H=%.1f%% Press=%.1f hPa G=%.1f Soil=%d Photo=%dHz\n",
+               now, lights_on, pump_on, bme_temp, bme_hum, bme_pressure, bme_gas, soil_moisture, photo_freq);
 
         int timestamp = (int)now;
 
@@ -539,20 +666,7 @@ int main()
             }
         }
 
-        // 4. Check Light Level
-        if (light_level != -1) {
-            if (abs(light_level - last_light_level) >= THRESH_LIGHT ||
-                (now - last_light_ts) >= HEARTBEAT_INTERVAL)
-            {
-                if (sql_execute_insert(db, sql_light_level, light_level, 0, timestamp) == SQLITE_OK) {
-                    printf("  -> Saved Light (Val: %d->%d)\n", last_light_level, light_level);
-                    last_light_level = light_level;
-                    last_light_ts = now;
-                }
-            }
-        }
-
-        // 5. Photoelectric water level (5-state with hysteresis)
+        // 4. Photoelectric water level (5-state with hysteresis)
         static int last_photo_freq = -999;
         static int last_water_state = -1;
         static time_t last_photo_ts = 0;

@@ -1,15 +1,83 @@
-## Overview
-This project is an IoT-based controlled environment system that enables plants to grow through their entire life cycle with minimal human intervention through use of embedded hardware and software solutions.
+# PhytoPi
 
-PhytoPi combines a Raspberry Pi-based sensor controller with a modern Flutter dashboard to create a complete plant monitoring ecosystem. The system tracks temperature, humidity, soil moisture, and water levels, while providing real-time data visualization, automated alerts, and AI-powered insights through a responsive web and mobile interface.
+An intelligent IoT-based plant monitoring and control system. PhytoPi combines a Raspberry Pi sensor controller with a Flutter kiosk dashboard and a Supabase cloud backend to automate plant cultivation with minimal human intervention.
 
-An intelligent IoT-based plant monitoring and control system that enables automated plant cultivation through embedded hardware and software solutions. PhytoPi monitors environmental conditions, manages resources, and provides real-time insights to help plants thrive with minimal human intervention.
+---
 
-[Execution]
-===========
-      make clean        # Creates a fresh compilation.
-      make              # Builds all the files required for execution.
-      sudo .bin/phytopi # Runs the generated executable.
+## Quick Reference — Pi Commands
+
+### Docker stack
+
+```bash
+# Start all services
+cd /home/phytopi/PhytoPi
+docker compose -f docker-compose.rpi.yml up -d
+
+# Stop all services
+docker compose -f docker-compose.rpi.yml down
+
+# Restart a single service  (sensors | camera | ai | updater)
+docker compose -f docker-compose.rpi.yml restart sensors
+
+# View status of all containers
+docker compose -f docker-compose.rpi.yml ps
+
+# Live logs (line-buffered, real-time)
+docker logs phytopi-sensors -f
+docker logs phytopi-camera  -f
+docker logs phytopi-ai      -f
+
+# Resource usage
+docker stats
+```
+
+### Kiosk UI (Flutter — runs natively via systemd)
+
+```bash
+sudo systemctl start   phytopi-ui.service
+sudo systemctl stop    phytopi-ui.service
+sudo systemctl restart phytopi-ui.service
+sudo systemctl status  phytopi-ui.service
+
+# Rebuild the Flutter bundle after UI source changes
+cd /home/phytopi/PhytoPi/User_Interface
+/home/phytopi/flutter/bin/flutter build linux --release \
+  --dart-define=KIOSK_MODE=true \
+  --dart-define=SUPABASE_URL="${SUPABASE_URL}" \
+  --dart-define=SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}"
+# systemd auto-restarts the app once the binary changes
+```
+
+### Boot persistence (run once on first setup)
+
+```bash
+# Auto-start Docker stack on boot
+sudo ln -s /home/phytopi/PhytoPi /opt/phyto
+sudo cp systemd/docker-compose-phytopi.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now docker-compose-phytopi.service
+
+# Auto-start kiosk UI on boot
+sudo cp systemd/phytopi-ui.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now phytopi-ui.service
+```
+
+### Manual update (normally done automatically by CI)
+
+```bash
+cd /home/phytopi/PhytoPi
+bash scripts/update.sh
+```
+
+### Rebuild a service after Dockerfile changes
+
+```bash
+docker compose -f docker-compose.rpi.yml build --no-cache sensors
+docker compose -f docker-compose.rpi.yml up -d sensors
+```
+
+---
 
 ## Project Structure
 
@@ -105,34 +173,11 @@ For detailed setup instructions, see `Data_Infraestructure/supabase/LOCAL_DEVELO
 
 ### Raspberry Pi Controller Setup
 
-1. **Navigate to the controller directory:**
-   ```bash
-   cd PhytoPI_Controler
-   ```
+The controller runs as a Docker container (`phytopi-sensors`). It is built automatically inside the container using Ubuntu 24.04 + libgpiod 2.x compiled from source — no manual dependency installation is needed on the host.
 
-2. **Install dependencies (Arch Linux):**
-   ```bash
-   sudo pacman -S libgpiod sqlite curl json-c
-   ```
+1. **Copy `.env` to the project root** with your Supabase credentials and device/sensor IDs (see `.env` for the full list of required variables).
 
-3. **Build the application:**
-   ```bash
-   make clean
-   make
-   ```
-
-4. **Configure environment variables:**
-   ```bash
-   export SUPABASE_URL="http://127.0.0.1:54321"
-   export SUPABASE_ANON_KEY="your-anon-key-here"
-   export SUPABASE_DEVICE_ID="your-device-uuid"
-   # ... additional sensor IDs
-   ```
-
-5. **Run the controller:**
-   ```bash
-   sudo ./bin/phytopi
-   ```
+2. **Start the stack** (see Quick Reference above).
 
 For detailed controller setup, see `PhytoPI_Controler/README.md`.
 
