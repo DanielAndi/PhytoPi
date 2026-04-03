@@ -46,7 +46,14 @@ bin/
 *.o
 *.obj
 
-
 # SQLite database files
 *.db
 sensor_data.db
+build/
+
+# OrcaSlicer Files
+*.3mf
+
+# Solidworks Files
+*.SLDPRT
+*.SLDASM

@@ -1,0 +1,14 @@
+FROM python:3.11-slim-bookworm
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+      supabase \
+      requests \
+      pillow \
+      ollama
+
+COPY scripts/ai_worker.py /app/ai_worker.py
+
+CMD ["python", "/app/ai_worker.py"]
+
