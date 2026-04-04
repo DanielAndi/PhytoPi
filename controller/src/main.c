@@ -3,6 +3,7 @@
 #include "../lib/supabase.h"
 #include "../lib/commands.h"
 #include "../lib/bme680.h"
+#include "../lib/state.h"
 #include <json-c/json.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,7 @@
 #define SYNC_INTERVAL 5      // Sync to Supabase every 5 seconds
 #define BATCH_SIZE 50        // Maximum readings per batch
 #define DATA_READ_INTERVAL 2 // Read sensors every 2 seconds
+#define STATE_PATH "/var/lib/phytopi/device_state.txt"
 
 // Deadband Thresholds
 #define THRESH_TEMP 1                 // 1 degree C
@@ -283,6 +285,20 @@ int main()
     if (!bme680_ok)
         fprintf(stderr, "Warning: BME680 init failed. Temp/humidity/pressure/gas disabled.\n");
 
+    device_state_t dev_state;
+    state_load(STATE_PATH, &dev_state);
+
+    /* Apply persisted state to hardware on startup */
+    if (dev_state.lights_on && lights_init() == 0)
+        lights_set(dev_state.lights_on);
+    if (dev_state.pump_on && pump_init() == 0)
+        pump_set(dev_state.pump_on);
+    if (dev_state.fan_duty > 0 && fans_init() == 0)
+        fans_set_both(dev_state.fan_duty);
+
+    int lights_on = dev_state.lights_on;
+    int pump_on = dev_state.pump_on;
+
     /* Database */
     const char *db_path = getenv("PHYTOPI_DB_PATH");
     if (!db_path || db_path[0] == '\0')
@@ -353,8 +369,6 @@ int main()
     int iteration = 0;
 
     /* Actuator state */
-    int lights_on = 0;
-    int pump_on = 0;
     time_t lights_off_at = 0;
     time_t pump_off_at = 0;
     time_t ventilation_off_at = 0;
@@ -396,6 +410,31 @@ int main()
         soil_moisture = (fd >= 0) ? read_pcf8591_channel(fd, 0) : -1; /* pcf8591 Ch0 */
 
         time_t now = time(NULL);
+
+        /* Auto-off actuators when their timer expires */
+        if (lights_off_at && now >= lights_off_at)
+        {
+            lights_set(0);
+            lights_on = 0;
+            dev_state.lights_on = 0;
+            lights_off_at = 0;
+            state_save(STATE_PATH, &dev_state);
+        }
+        if (pump_off_at && now >= pump_off_at)
+        {
+            pump_set(0);
+            pump_on = 0;
+            dev_state.pump_on = 0;
+            pump_off_at = 0;
+            state_save(STATE_PATH, &dev_state);
+        }
+        if (ventilation_off_at && now >= ventilation_off_at)
+        {
+            fans_set_both(0);
+            dev_state.fan_duty = 0;
+            ventilation_off_at = 0;
+            state_save(STATE_PATH, &dev_state);
+        }
 
         // BME680 read (every 3s for stability)
         if (now - last_bme_read >= 3)
@@ -558,6 +597,8 @@ int main()
                         if (lights_init() == 0 && lights_set(desired) == 0)
                         {
                             lights_on = desired;
+                            dev_state.lights_on = desired;
+                            state_save(STATE_PATH, &dev_state); // Persist state
                             lights_off_at = (desired && duration_sec > 0) ? (time(NULL) + duration_sec) : 0;
                             ok = 1;
                             printf("  -> Lights %s (duration=%ds, auto-off=%s)\n",
@@ -590,6 +631,8 @@ int main()
                         else
                         {
                             pump_on = desired;
+                            dev_state.pump_on = desired;
+                            state_save(STATE_PATH, &dev_state); // Persist state
                             pump_off_at = (desired && duration_sec > 0) ? (time(NULL) + duration_sec) : 0;
                             ok = 1;
                             printf("  -> Pump %s (duration=%ds, auto-off=%s)\n",
@@ -613,6 +656,8 @@ int main()
                             /* Avoid 0% when "on" requested - use minimum duty */
                             int duty = desired ? FAN_MIN_DUTY_WHEN_ON : 0;
                             fans_set_both(duty);
+                            dev_state.fan_duty = duty;
+                            state_save(STATE_PATH, &dev_state);
                             ok = 1;
                         }
                     }
@@ -636,6 +681,8 @@ int main()
                         if (fans_init() == 0)
                         {
                             fans_set_both(duty);
+                            dev_state.fan_duty = duty;
+                            state_save(STATE_PATH, &dev_state);
                             ventilation_off_at = time(NULL) + duration_sec;
                             ok = 1;
                         }
@@ -658,7 +705,11 @@ int main()
                         if (duty > 100)
                             duty = 100;
                         if (fans_init() == 0 && fans_set_speed(fan_id, duty) == 0)
+                        {
+                            dev_state.fan_duty = duty; // approximation — both fans assumed same duty
+                            state_save(STATE_PATH, &dev_state);
                             ok = 1;
+                        }
                     }
                     else if (strcmp(cmd.command_type, "capture_image") == 0 && supabase_cfg.device_id)
                     {
@@ -781,7 +832,11 @@ int main()
                             strcmp(metric, "gas_resistance") == 0)
                         {
                             if (fans_init() == 0)
+                            {
                                 fans_set_both(FAN_MIN_DUTY_WHEN_ON);
+                                dev_state.fan_duty = FAN_MIN_DUTY_WHEN_ON;
+                                state_save(STATE_PATH, &dev_state);
+                            }
                             ventilation_off_at = now + 300;
                         }
                     }
@@ -852,6 +907,8 @@ int main()
                             if (strcmp(sched[s].schedule_type, "lights") == 0 && lights_init() == 0)
                             {
                                 lights_set(state);
+                                dev_state.lights_on = state;
+                                state_save(STATE_PATH, &dev_state);
                                 lights_on = state;
                                 lights_off_at = (state && duration > 0) ? (now + duration) : 0;
                                 if (lights_off_at)
@@ -860,12 +917,16 @@ int main()
                             else if (strcmp(sched[s].schedule_type, "pump") == 0 && pump_init() == 0)
                             {
                                 pump_set(state);
+                                dev_state.pump_on = state;
+                                state_save(STATE_PATH, &dev_state);
                                 pump_on = state;
                                 pump_off_at = (state && duration > 0) ? (now + duration) : 0;
                             }
                             else if (strcmp(sched[s].schedule_type, "ventilation") == 0 && fans_init() == 0)
                             {
                                 fans_set_both(state ? (duty > 0 ? duty : FAN_MIN_DUTY_WHEN_ON) : 0);
+                                dev_state.fan_duty = state ? (duty > 0 ? duty : FAN_MIN_DUTY_WHEN_ON) : 0;
+                                state_save(STATE_PATH, &dev_state);
                                 ventilation_off_at = (state && duration > 0) ? (now + duration) : 0;
                             }
                             {
