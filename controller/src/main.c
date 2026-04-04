@@ -45,21 +45,6 @@
 // Force a recording every X seconds even if values haven't changed
 #define HEARTBEAT_INTERVAL 300 // 5 minutes
 
-/* Dorm controller baseline behavior parity */
-#define DORM_LIGHT_ON_HOURS 14
-#define DORM_LIGHT_OFF_HOURS 10
-#define DORM_LIGHT_ON_SECS (DORM_LIGHT_ON_HOURS * 3600)
-#define DORM_LIGHT_OFF_SECS (DORM_LIGHT_OFF_HOURS * 3600)
-#define DORM_SOIL_CHECK_INTERVAL 300
-#define DORM_DRY_THRESHOLD 130
-#define DORM_WET_THRESHOLD 95
-#define DORM_PUMP_PULSE_SEC 10
-#define DORM_PUMP_COOLDOWN_SEC 120
-#define DORM_BME_CHECK_INTERVAL 30
-#define DORM_VENT_FAN_TEMP_C 28.333f /* 83F */
-#define DORM_ELEC_FAN_DUTY 100
-#define DORM_VENT_FAN_DUTY 100
-
 // Sensor ID mapping - these should match your Supabase sensors table
 // Set via environment variables: SUPABASE_HUMIDITY_SENSOR_ID, etc.
 static char *humidity_sensor_id = NULL;
@@ -406,25 +391,20 @@ int main()
     int photoelectric_fail_count = 0;
     static time_t last_bme_alert = 0, last_photo_alert = 0;
 
-    // BME680 init (replaces DHT11)
     float bme_temp = -999, bme_hum = -999, bme_pressure = -999, bme_gas = -999;
     float last_bme_temp = -999, last_bme_hum = -999, last_bme_pressure = -999, last_bme_gas = -999;
     time_t last_bme_ts = 0;
-    int bme680_ok = (bme680_init() == 0);
 
-    if (!bme680_ok)
-        fprintf(stderr, "Warning: BME680 init failed. Temp/humidity/pressure/gas readings disabled.\n");
+    int bme680_ok = (bme680_init() == 0);
 
     while (1)
     {
         soil_moisture = (fd >= 0) ? read_pcf8591_channel(fd, 0) : -1;  /* pcf8591 Ch0 */
-        water_level   = -1;  /* No legacy analog water sensor; use photoelectric (Photo Hz) */
-        /* light_level: no analog light sensor connected */
 
         time_t now = time(NULL);
 
         // BME680 read (every 3s for stability)
-        if (bme680_ok && (now - last_bme_read >= 3))
+        if (now - last_bme_read >= 3)
         {
             bme680_data_t bme_data;
             if (bme680_read(&bme_data) == 0 && bme_data.valid)
