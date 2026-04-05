@@ -10,6 +10,14 @@ import '../models/sensor_model.dart';
 class DeviceProvider extends ChangeNotifier {
   static const int _maxHistoryPoints = 10000; // Store up to ~1 week of minute-by-minute data
 
+  /// Legacy rows may store raw ADC (0–255); map to % using same scale as firmware (SOIL_ADC_MAX=150).
+  static double _normalizeSoilMoisture(double v) {
+    if (v > 100 && v <= 255) {
+      return (v * 100 / 150).clamp(0.0, 100.0);
+    }
+    return v.clamp(0.0, 100.0);
+  }
+
   List<Device> _devices = [];
   Device? _selectedDevice;
   List<Sensor> _sensors = [];
@@ -28,9 +36,11 @@ class DeviceProvider extends ChangeNotifier {
   RealtimeChannel? _readingsSubscription;
   RealtimeChannel? _alertsSubscription;
   RealtimeChannel? _devicesSubscription;
+  RealtimeChannel? _actuatorSubscription;
   List<Map<String, dynamic>> _alerts = [];
   List<Map<String, dynamic>> _thresholds = [];
   List<Map<String, dynamic>> _schedules = [];
+  Map<String, dynamic>? _actuatorState;
   Timer? _offlineCheckTimer;
   Timer? _deviceRefreshTimer;
 
@@ -38,6 +48,7 @@ class DeviceProvider extends ChangeNotifier {
   List<Map<String, dynamic>> get alerts => _alerts;
   List<Map<String, dynamic>> get thresholds => _thresholds;
   List<Map<String, dynamic>> get schedules => _schedules;
+  Map<String, dynamic>? get actuatorState => _actuatorState;
   Device? get selectedDevice => _selectedDevice;
   List<Sensor> get sensors => _sensors;
   bool get isLoading => _isLoading;
@@ -296,6 +307,7 @@ class DeviceProvider extends ChangeNotifier {
     _alerts.clear();
     _thresholds.clear();
     _schedules.clear();
+    _actuatorState = null;
     _lastUpdate = null;
     _hasReadings = false;
     
@@ -341,6 +353,8 @@ class DeviceProvider extends ChangeNotifier {
       _subscribeToAlerts(deviceId);
       await _fetchThresholds(deviceId);
       await _fetchSchedules(deviceId);
+      await _fetchActuatorState(deviceId);
+      _subscribeToActuatorState(deviceId);
 
     } catch (e) {
       _error = e.toString();
@@ -370,12 +384,19 @@ class DeviceProvider extends ChangeNotifier {
         if (data.isNotEmpty) {
           // Update latest reading from the most recent one
           final latest = data.first;
-          _latestReadings[typeKey] = (latest['value'] as num).toDouble();
+          var latestVal = (latest['value'] as num).toDouble();
+          if (typeKey == 'soil_moisture') {
+            latestVal = _normalizeSoilMoisture(latestVal);
+          }
+          _latestReadings[typeKey] = latestVal;
           _lastUpdate = DateTime.parse(latest['ts']); // This will be roughly the last update
           
           // Build history (reversed because we fetched descending)
           final points = data.map((r) {
-             final val = (r['value'] as num).toDouble();
+             var val = (r['value'] as num).toDouble();
+             if (typeKey == 'soil_moisture') {
+               val = _normalizeSoilMoisture(val);
+             }
              final ts = DateTime.parse(r['ts']).millisecondsSinceEpoch.toDouble();
              return FlSpot(ts, val);
           }).toList();
@@ -435,8 +456,10 @@ class DeviceProvider extends ChangeNotifier {
       if (sensor.id.isEmpty || sensor.sensorType == null) return;
       
       final typeKey = sensor.sensorType!.key;
-      
-      _latestReadings[typeKey] = value;
+      final displayValue =
+          typeKey == 'soil_moisture' ? _normalizeSoilMoisture(value) : value;
+
+      _latestReadings[typeKey] = displayValue;
       _lastUpdate = ts;
       _hasReadings = true;
       
@@ -445,7 +468,7 @@ class DeviceProvider extends ChangeNotifier {
       final newTimestamp = ts.millisecondsSinceEpoch.toDouble();
       
       // Add new point
-      currentHistory.add(FlSpot(newTimestamp, value));
+      currentHistory.add(FlSpot(newTimestamp, displayValue));
       
       // Keep only last N points, but after sorting to ensure we keep the newest ones
       // Sort by X (time) to prevent chart loops
@@ -473,6 +496,10 @@ class DeviceProvider extends ChangeNotifier {
     if (_alertsSubscription != null) {
       SupabaseConfig.client?.removeChannel(_alertsSubscription!);
       _alertsSubscription = null;
+    }
+    if (_actuatorSubscription != null) {
+      SupabaseConfig.client?.removeChannel(_actuatorSubscription!);
+      _actuatorSubscription = null;
     }
     // Keep _devicesSubscription and _offlineCheckTimer - they persist across device selection
   }
@@ -643,6 +670,47 @@ class DeviceProvider extends ChangeNotifier {
     if (_selectedDevice != null) await _fetchThresholds(_selectedDevice!.id);
   }
 
+  Future<void> _fetchActuatorState(String deviceId) async {
+    if (!SupabaseConfig.isInitialized) return;
+    try {
+      final res = await SupabaseConfig.client!
+          .from('device_actuator_state')
+          .select()
+          .eq('device_id', deviceId)
+          .maybeSingle();
+      _actuatorState = res != null ? Map<String, dynamic>.from(res as Map) : null;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('DeviceProvider: Error fetching actuator state: $e');
+    }
+  }
+
+  void _subscribeToActuatorState(String deviceId) {
+    if (_actuatorSubscription != null) {
+      SupabaseConfig.client?.removeChannel(_actuatorSubscription!);
+      _actuatorSubscription = null;
+    }
+    _actuatorSubscription = SupabaseConfig.client!
+        .channel('actuator_$deviceId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          table: 'device_actuator_state',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'device_id',
+            value: deviceId,
+          ),
+          callback: (payload) {
+            final record = payload.newRecord;
+            if (record.isNotEmpty) {
+              _actuatorState = Map<String, dynamic>.from(record);
+              notifyListeners();
+            }
+          },
+        )
+        .subscribe();
+  }
+
   Future<void> closeAlert(String alertId) async {
     if (!SupabaseConfig.isInitialized) return;
     try {
@@ -677,7 +745,7 @@ class DeviceProvider extends ChangeNotifier {
       'water_level': 80.0,
       'water_level_frequency': 2.0, // 0-4: Empty, Low, Mid, High, Full
       'pressure': 1013.0,
-      'gas_resistance': 45.0,
+      'gas_resistance': 320.0,
     };
     _hasReadings = true;
     _lastUpdate = DateTime.now();
@@ -715,7 +783,7 @@ class DeviceProvider extends ChangeNotifier {
       }),
       'gas_resistance': List.generate(10, (i) {
         final ts = now.subtract(Duration(minutes: (10 - i) * 5)).millisecondsSinceEpoch.toDouble();
-        return FlSpot(ts, 40 + Random().nextDouble() * 20);
+        return FlSpot(ts, 200 + Random().nextDouble() * 450);
       }),
     };
     notifyListeners();
@@ -764,7 +832,11 @@ class DeviceProvider extends ChangeNotifier {
          else if (key == 'water_level') val = newWater;
          else if (key == 'water_level_frequency') val = (2 + Random().nextDouble()).clamp(0.0, 4.0);
          else if (key == 'pressure') val = 1010 + Random().nextDouble() * 10;
-         else if (key == 'gas_resistance') val = 40 + Random().nextDouble() * 20;
+         else if (key == 'gas_resistance') {
+           final g = _latestReadings['gas_resistance'] ?? 300.0;
+           val = (g + (Random().nextDouble() - 0.5) * 40).clamp(50.0, 2000.0);
+           _latestReadings['gas_resistance'] = val;
+         }
 
          history.add(FlSpot(ts, val));
          _historicalReadings[key] = List.from(history);
@@ -789,6 +861,56 @@ class DeviceProvider extends ChangeNotifier {
     super.dispose();
   }
   
+  /// Apply default thresholds and schedules for indoor basil (server RPC).
+  Future<void> applyBasilPreset() async {
+    if (!SupabaseConfig.isInitialized) {
+      throw Exception('Supabase not configured');
+    }
+    final device = _selectedDevice;
+    if (device == null) {
+      throw Exception('No device selected');
+    }
+    await SupabaseConfig.client!.rpc(
+      'apply_plant_preset',
+      params: {
+        'p_device_id': device.id,
+        'p_preset': 'basil',
+      },
+    );
+    await _fetchThresholds(device.id);
+    await _fetchSchedules(device.id);
+    notifyListeners();
+  }
+
+  Future<void> updateDeviceName(String deviceId, String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      throw Exception('Device name cannot be empty');
+    }
+    if (!SupabaseConfig.isInitialized) {
+      final idx = _devices.indexWhere((d) => d.id == deviceId);
+      if (idx >= 0) {
+        _devices[idx] = _devices[idx].copyWith(name: trimmed);
+        if (_selectedDevice?.id == deviceId) {
+          _selectedDevice = _selectedDevice!.copyWith(name: trimmed);
+        }
+        notifyListeners();
+      }
+      return;
+    }
+    await SupabaseConfig.client!
+        .from(SupabaseConfig.devicesTable)
+        .update({'name': trimmed}).eq('id', deviceId);
+    final idx = _devices.indexWhere((d) => d.id == deviceId);
+    if (idx >= 0) {
+      _devices[idx] = _devices[idx].copyWith(name: trimmed);
+    }
+    if (_selectedDevice?.id == deviceId) {
+      _selectedDevice = _selectedDevice!.copyWith(name: trimmed);
+    }
+    notifyListeners();
+  }
+
   Future<void> claimDevice(String serialNumber) async {
     _isLoading = true;
     notifyListeners();
@@ -796,9 +918,11 @@ class DeviceProvider extends ChangeNotifier {
     try {
       if (!SupabaseConfig.isInitialized) {
         // Demo mode
+        final short =
+            serialNumber.length > 8 ? serialNumber.substring(0, 8) : serialNumber;
         final newDevice = Device(
           id: serialNumber,
-          name: 'New Device ($serialNumber)',
+          name: 'PhytoPi $short',
           lastSeen: DateTime.now(),
         );
         _devices.add(newDevice);

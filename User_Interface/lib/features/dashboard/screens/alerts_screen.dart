@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../../core/config/supabase_config.dart';
 import '../providers/device_provider.dart';
 
 class AlertsScreen extends StatefulWidget {
@@ -774,12 +775,11 @@ class _AlertsScreenState extends State<AlertsScreen>
 
   static const List<Map<String, String>> _thresholdMetrics = [
     {'key': 'temp_c', 'label': 'Temperature (°C)'},
-    {'key': 'humidity', 'label': 'Humidity (%)'},
+    {'key': 'humidity', 'label': 'Air Humidity (%)'},
+    {'key': 'soil_moisture', 'label': 'Soil Moisture (%)'},
     {'key': 'pressure', 'label': 'Pressure (hPa)'},
     {'key': 'gas_resistance', 'label': 'Gas / VOC (kOhm)'},
     {'key': 'water_level_low', 'label': 'Water Level Low'},
-    {'key': 'soil_moisture', 'label': 'Soil Moisture (%)'},
-    {'key': 'light_lux', 'label': 'Light (lux)'},
   ];
 
   Widget _buildThresholdsTab(DeviceProvider deviceProvider) {
@@ -791,10 +791,58 @@ class _AlertsScreenState extends State<AlertsScreen>
       padding: const EdgeInsets.all(16),
       children: [
         Text(
-          'Thresholds define min/max ranges for alerts. The device checks every 60 seconds.',
+          'Thresholds define min/max ranges for alerts. The device checks every 60 seconds and sends at most one alert per metric every 15 minutes.',
           style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
         ),
         const SizedBox(height: 16),
+        Card(
+          margin: const EdgeInsets.only(bottom: 16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Plant presets',
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Apply default soil/temp/humidity thresholds plus light and pump schedules suited to indoor basil.',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  onPressed: !SupabaseConfig.isInitialized
+                      ? null
+                      : () async {
+                          try {
+                            await deviceProvider.applyBasilPreset();
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Basil defaults applied (thresholds + schedules)'),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Could not apply preset: $e'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                  icon: const Icon(Icons.local_florist_outlined),
+                  label: const Text('Apply basil defaults'),
+                ),
+              ],
+            ),
+          ),
+        ),
         OutlinedButton.icon(
           onPressed: () => _showAddThresholdDialog(context, deviceProvider),
           icon: const Icon(Icons.add),
@@ -892,6 +940,20 @@ class _AlertsScreenState extends State<AlertsScreen>
     if (deviceProvider.selectedDevice == null) return;
     final device = deviceProvider.selectedDevice!;
 
+    final availableMetrics = _thresholdMetrics
+        .where((m) => !deviceProvider.thresholds.any((t) => t['metric'] == m['key']))
+        .toList();
+
+    if (availableMetrics.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('All metrics already have thresholds — use the edit button on any card to adjust them.'),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
     String? selectedMetric;
     final minController = TextEditingController();
     final maxController = TextEditingController();
@@ -908,12 +970,19 @@ class _AlertsScreenState extends State<AlertsScreen>
               children: [
                 DropdownButtonFormField<String>(
                   value: selectedMetric,
-                  decoration: const InputDecoration(labelText: 'Metric'),
-                  items: _thresholdMetrics
-                      .where((m) => !deviceProvider.thresholds.any((t) => t['metric'] == m['key']))
+                  decoration: const InputDecoration(
+                    labelText: 'Metric',
+                    hintText: 'Select a metric',
+                  ),
+                  items: availableMetrics
                       .map((m) => DropdownMenuItem(value: m['key']!, child: Text(m['label']!)))
                       .toList(),
                   onChanged: (v) => setState(() => selectedMetric = v),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Alert fires when the reading goes below Min or above Max.',
+                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: Theme.of(ctx).hintColor),
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -980,7 +1049,13 @@ class _AlertsScreenState extends State<AlertsScreen>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('Metric: ${t['metric']}', style: Theme.of(ctx).textTheme.titleSmall),
+                Text(
+                  _thresholdMetrics.firstWhere(
+                    (m) => m['key'] == t['metric'],
+                    orElse: () => {'label': t['metric'] as String? ?? ''},
+                  )['label']!,
+                  style: Theme.of(ctx).textTheme.titleSmall,
+                ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: minController,
