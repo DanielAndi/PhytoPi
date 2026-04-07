@@ -1,0 +1,57 @@
+name: Deploy to Pi
+
+on:
+  push:
+    branches:
+      - main
+      - release/v*
+    paths:
+      # Trigger only when Pi-relevant code changes
+      - 'User_Interface/**'
+      - 'PhytoPI_Controler/**'
+      - 'docker-compose.rpi.yml'
+      - 'docker/**'
+      - 'scripts/**'
+      - '.github/workflows/deploy-pi.yml'
+  workflow_dispatch:     # Allow manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    name: Update PhytoPi
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Wait for Pi to be reachable
+        run: |
+          echo "Waiting for phytopi to appear on Tailscale..."
+          for i in $(seq 1 12); do
+            if tailscale ping --c 1 phytopi > /dev/null 2>&1; then
+              echo "Pi reachable."
+              break
+            fi
+            echo "Attempt $i/12 – retrying in 5s..."
+            sleep 5
+          done
+
+      - name: Run update script on Pi via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: phytopi        # Tailscale MagicDNS hostname
+          username: phytopi
+          key: ${{ secrets.PI_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd /home/phytopi/PhytoPi
+            bash scripts/update.sh
+
+      - name: Report result
+        if: always()
+        run: echo "Deploy step finished with status ${{ job.status }}"

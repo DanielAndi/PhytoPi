@@ -1,0 +1,31 @@
+version: "3.9"
+
+# Run on the AI server (home PC / workstation), NOT on the Pi.
+# The worker connects to Supabase over the internet, polls ai_capture_jobs,
+# runs Moondream vision inference via Ollama, and writes results back.
+#
+# Prerequisites on the server:
+#   1. Ollama running and listening (default: http://host.docker.internal:11434)
+#   2. A .env file in this directory (copy from .env.server.example and fill in)
+#
+# Start:
+#   docker compose -f docker-compose.server.yml up -d
+
+services:
+  ai:
+    build:
+      context: ./PhytoPI_Controler
+      dockerfile: ./Dockerfile.ai
+    container_name: phytopi-ai
+    restart: unless-stopped
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-moondream:1.8b}
+      PLANTNET_API_KEY: ${PLANTNET_API_KEY:-}
+      PLANTNET_CONFIDENCE_THRESHOLD: ${PLANTNET_CONFIDENCE_THRESHOLD:-0.20}
+    # Allows the container to reach Ollama running on the host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
