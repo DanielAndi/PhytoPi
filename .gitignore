@@ -37,6 +37,11 @@ node_modules/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.*
+**/.env.backup
+
+# Local archives / safety backups
+_project_root_archive/
 
 # Build outputs
 dist/
