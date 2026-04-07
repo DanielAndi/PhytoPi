@@ -44,6 +44,12 @@ class DeviceProvider extends ChangeNotifier {
   Timer? _offlineCheckTimer;
   Timer? _deviceRefreshTimer;
 
+  /// Matches [FAN_MIN_DUTY_WHEN_ON] in controller firmware for `toggle_fans` ON.
+  static const int _fanToggleOnDuty = 80;
+
+  /// Cancels stale background refetches when a new command is sent.
+  int _actuatorReconcileGeneration = 0;
+
   List<Device> get devices => _devices;
   List<Map<String, dynamic>> get alerts => _alerts;
   List<Map<String, dynamic>> get thresholds => _thresholds;
@@ -84,9 +90,45 @@ class DeviceProvider extends ChangeNotifier {
     });
   }
 
+  /// Update Commands tab immediately; Pi applies the command ~2s later so a straight
+  /// refetch would keep showing the old row and feel "stuck".
+  void _applyOptimisticActuatorPatch(Map<String, dynamic> patch) {
+    final id = _selectedDevice?.id;
+    if (id == null) return;
+    final base = _actuatorState != null
+        ? Map<String, dynamic>.from(_actuatorState!)
+        : <String, dynamic>{'device_id': id};
+    base.addAll(patch);
+    _actuatorState = base;
+    notifyListeners();
+  }
+
+  /// Refetch a few times after the device has time to run the queued command.
+  void _scheduleActuatorReconcileWithServer() {
+    if (!SupabaseConfig.isInitialized) return;
+    final id = _selectedDevice?.id;
+    if (id == null) return;
+    final gen = ++_actuatorReconcileGeneration;
+    unawaited(Future<void>(() async {
+      const delays = [
+        Duration(milliseconds: 800),
+        Duration(milliseconds: 2500),
+        Duration(milliseconds: 5000),
+      ];
+      for (final d in delays) {
+        await Future<void>.delayed(d);
+        if (gen != _actuatorReconcileGeneration) return;
+        if (_selectedDevice?.id != id) return;
+        await _fetchActuatorState(id);
+      }
+    }));
+  }
+
   Future<void> toggleGrowLights(bool on) async {
     try {
       await _sendCommand('toggle_light', {'state': on});
+      _applyOptimisticActuatorPatch({'lights_on': on});
+      _scheduleActuatorReconcileWithServer();
     } catch (e) {
       _error = e.toString();
       debugPrint('DeviceProvider: Error toggling grow lights: $e');
@@ -100,6 +142,8 @@ class DeviceProvider extends ChangeNotifier {
       final payload = <String, dynamic>{'state': on};
       if (durationSec != null) payload['duration_sec'] = durationSec;
       await _sendCommand('toggle_pump', payload);
+      _applyOptimisticActuatorPatch({'pump_on': on});
+      _scheduleActuatorReconcileWithServer();
     } catch (e) {
       _error = e.toString();
       debugPrint('DeviceProvider: Error toggling pump: $e');
@@ -111,6 +155,8 @@ class DeviceProvider extends ChangeNotifier {
   Future<void> toggleFans(bool on) async {
     try {
       await _sendCommand('toggle_fans', {'state': on});
+      _applyOptimisticActuatorPatch({'fan_duty': on ? _fanToggleOnDuty : 0});
+      _scheduleActuatorReconcileWithServer();
     } catch (e) {
       _error = e.toString();
       debugPrint('DeviceProvider: Error toggling fans: $e');
@@ -125,6 +171,9 @@ class DeviceProvider extends ChangeNotifier {
         'fan_id': fanId,
         'duty_percent': dutyPercent.clamp(0, 100),
       });
+      final d = dutyPercent.clamp(0, 100);
+      _applyOptimisticActuatorPatch({'fan_duty': d});
+      _scheduleActuatorReconcileWithServer();
     } catch (e) {
       _error = e.toString();
       debugPrint('DeviceProvider: Error setting fan speed: $e');
@@ -139,6 +188,9 @@ class DeviceProvider extends ChangeNotifier {
         'duration_sec': durationSec,
         'duty_percent': dutyPercent,
       });
+      final d = dutyPercent.clamp(0, 100);
+      _applyOptimisticActuatorPatch({'fan_duty': d});
+      _scheduleActuatorReconcileWithServer();
     } catch (e) {
       _error = e.toString();
       debugPrint('DeviceProvider: Error running ventilation: $e');
@@ -462,7 +514,18 @@ class DeviceProvider extends ChangeNotifier {
       _latestReadings[typeKey] = displayValue;
       _lastUpdate = ts;
       _hasReadings = true;
-      
+
+      // Keep Device.lastReadingAt in sync so isOnline reflects live data arrival.
+      final deviceId = sensor.deviceId;
+      final devIdx = _devices.indexWhere((d) => d.id == deviceId);
+      if (devIdx >= 0) {
+        final updated = _devices[devIdx].copyWith(lastReadingAt: ts);
+        _devices[devIdx] = updated;
+        if (_selectedDevice?.id == deviceId) {
+          _selectedDevice = updated;
+        }
+      }
+
       // Update history
       final currentHistory = _historicalReadings[typeKey] ?? [];
       final newTimestamp = ts.millisecondsSinceEpoch.toDouble();
@@ -565,6 +628,38 @@ class DeviceProvider extends ChangeNotifier {
 
   List<Map<String, dynamic>> get alertHistory =>
       _alerts.where((a) => a['resolved_at'] != null).toList();
+
+  /// Returns (suggestedMin, suggestedMax) for a metric key derived from
+  /// recent reading history already loaded in [_historicalReadings].
+  /// The bounds are widened by ~10 % of range so they sit just outside
+  /// observed values.  Returns (null, null) when no data is available
+  /// (e.g. fan_duty which has no sensor reading series).
+  (double?, double?) suggestBoundsForMetric(String metricKey) {
+    if (metricKey == 'fan_duty') return (null, null);
+
+    final points = _historicalReadings[metricKey];
+    if (points != null && points.isNotEmpty) {
+      var minVal = points.map((p) => p.y).reduce((a, b) => a < b ? a : b);
+      var maxVal = points.map((p) => p.y).reduce((a, b) => a > b ? a : b);
+      final padding = (maxVal - minVal) * 0.10;
+      // At least 1-unit padding to avoid zero-width range on flat signals
+      final pad = padding < 1.0 ? 1.0 : padding;
+      return (
+        double.parse((minVal - pad).toStringAsFixed(1)),
+        double.parse((maxVal + pad).toStringAsFixed(1)),
+      );
+    }
+    // Fallback: use single latest reading with ±10 % heuristic
+    final latest = _latestReadings[metricKey];
+    if (latest != null) {
+      final pad = (latest.abs() * 0.10).clamp(1.0, double.infinity);
+      return (
+        double.parse((latest - pad).toStringAsFixed(1)),
+        double.parse((latest + pad).toStringAsFixed(1)),
+      );
+    }
+    return (null, null);
+  }
 
   Future<void> _fetchThresholds(String deviceId) async {
     try {

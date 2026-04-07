@@ -135,6 +135,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
             icon: const Icon(Icons.add),
             label: const Text('Claim Device'),
           ),
+          floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
           body: RefreshIndicator(
             onRefresh: () => deviceProvider.refreshDevices(),
             child: SingleChildScrollView(

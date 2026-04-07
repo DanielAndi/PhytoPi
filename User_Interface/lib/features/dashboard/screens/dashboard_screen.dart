@@ -603,9 +603,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             _chip(
               icon: Icons.videocam_outlined,
-              label: online ? 'Camera Ready' : 'Camera Unknown',
-              subtitle: '',
-              active: online,
+              label: 'Live Camera',
+              subtitle: 'AI Health tab',
+              active: true,
               ok: true,
             ),
           ],
@@ -644,16 +644,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Overview',
-                style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Monitor your plant environment in real-time',
-                style: theme.textTheme.bodyLarge?.copyWith(color: theme.textTheme.bodySmall?.color),
-              ),
-              const SizedBox(height: 32),
               
               if (selectedDevice == null)
                 Container(
@@ -733,10 +723,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                   ),
-                // DEVICE STATUS SECTION
-                _buildDeviceStatus(context, theme, deviceProvider),
-                const SizedBox(height: 32),
-
                 // GAUGES ROW
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -929,6 +915,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                   ],
                 ),
+
+                const SizedBox(height: 32),
+                // DEVICE STATUS SECTION
+                _buildDeviceStatus(context, theme, deviceProvider),
               ],
             ],
           ),
