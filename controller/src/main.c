@@ -415,6 +415,7 @@ int main()
     time_t last_thr_alert_gas = 0;
     time_t last_thr_alert_water = 0;
     time_t last_thr_alert_soil = 0;
+    time_t last_thr_alert_fan = 0;
 
     while (1)
     {
@@ -485,7 +486,7 @@ int main()
                     (now - last_bme_alert) >= SENSOR_ALERT_COOLDOWN)
                 {
                     if (supabase_insert_alert(&supabase_cfg, supabase_cfg.device_id,
-                                              "sensor_failure", "BME680 sensor unreachable after repeated failures",
+                                              "sensor_failure_bme680", "BME680 sensor unreachable after repeated failures",
                                               "high", "automated") == 0)
                         last_bme_alert = now;
                 }
@@ -503,7 +504,7 @@ int main()
                     supabase_cfg.device_id && (now - last_photo_alert) >= SENSOR_ALERT_COOLDOWN)
                 {
                     if (supabase_insert_alert(&supabase_cfg, supabase_cfg.device_id,
-                                                "sensor_failure", "Photoelectric water level sensor unreachable",
+                                                "sensor_failure_photoelectric", "Photoelectric water level sensor unreachable",
                                                 "high", "automated") == 0)
                         last_photo_alert = now;
                 }
@@ -835,6 +836,11 @@ int main()
                     cooldown_ptr = &last_thr_alert_water;
                     cooldown_seconds = WATER_ALERT_COOLDOWN;
                 }
+                else if (strcmp(metric, "fan_duty") == 0)
+                {
+                    val = (double)dev_state.fan_duty;
+                    cooldown_ptr = &last_thr_alert_fan;
+                }
                 if (val < -900 && strcmp(metric, "water_level_low") != 0)
                     continue;
                 int exceeded = 0;
@@ -865,7 +871,11 @@ int main()
                     else
                         snprintf(msg, sizeof(msg), "%s %.1f outside range [%.1f, %.1f]",
                                  metric, val, cached_thresholds[t].min_value, cached_thresholds[t].max_value);
-                    const char *alert_type = (strcmp(metric, "water_level_low") == 0) ? "water_level_low" : "threshold";
+                    char alert_type_buf[64];
+                    const char *alert_type =
+                        (strcmp(metric, "water_level_low") == 0)
+                            ? "water_level_low"
+                            : (snprintf(alert_type_buf, sizeof(alert_type_buf), "threshold_%s", metric), alert_type_buf);
                     const char *severity = (strcmp(metric, "water_level_low") == 0) ? "high" : "medium";
                     printf("  [Thresholds] EXCEEDED: %s\n", msg);
                     if (supabase_insert_alert(&supabase_cfg, supabase_cfg.device_id,
@@ -936,8 +946,15 @@ int main()
                         }
                         if (should_run)
                         {
+                            static struct
+                            {
+                                char id[SCHEDULE_ID_LEN];
+                                time_t last_alert_at;
+                            } sched_alert_cd[32];
+                            static int sched_alert_cd_n = 0;
+
                             json_object *pl = json_tokener_parse(sched[s].payload_json);
-                            int state = 1, duration = 30, duty = 80;
+                            int state = 1, duration = 0, duty = 80;
                             if (pl)
                             {
                                 json_object *st = NULL, *du = NULL, *dt = NULL;
@@ -949,32 +966,110 @@ int main()
                                     duty = json_object_get_int(dt);
                                 json_object_put(pl);
                             }
-                            if (strcmp(sched[s].schedule_type, "lights") == 0 && lights_init() == 0)
+                            int sched_applied = 0;
+                            const char *alert_type = "schedule";
+                            char alert_msg[192];
+
+                            if (strcmp(sched[s].schedule_type, "lights") == 0)
                             {
-                                lights_set(state);
-                                dev_state.lights_on = state;
-                                state_save(STATE_PATH, &dev_state);
-                                lights_on = state;
-                                lights_off_at = (state && duration > 0) ? (now + duration) : 0;
-                                if (lights_off_at)
-                                    printf("  -> Lights ON (auto-off in %ds)\n", duration);
+                                if (lights_init() == 0 && lights_set(state) == 0)
+                                {
+                                    dev_state.lights_on = state;
+                                    lights_on = state;
+                                    lights_off_at = (state && duration > 0) ? (now + duration) : 0;
+                                    if (lights_off_at)
+                                        printf("  -> Lights ON (auto-off in %ds) [schedule]\n", duration);
+                                    else
+                                        printf("  -> Lights %s [schedule]\n", state ? "ON" : "OFF");
+                                    alert_type = "schedule_lights";
+                                    if (state)
+                                    {
+                                        if (lights_off_at)
+                                            snprintf(alert_msg, sizeof(alert_msg),
+                                                     "Scheduled: Grow lights ON (auto-off in %d s)", duration);
+                                        else
+                                            snprintf(alert_msg, sizeof(alert_msg),
+                                                     "Scheduled: Grow lights ON");
+                                    }
+                                    else
+                                        snprintf(alert_msg, sizeof(alert_msg),
+                                                 "Scheduled: Grow lights OFF");
+                                    sched_applied = 1;
+                                }
+                                else
+                                    fprintf(stderr, "  [Schedule] lights: init or GPIO failed\n");
                             }
-                            else if (strcmp(sched[s].schedule_type, "pump") == 0 && pump_init() == 0)
+                            else if (strcmp(sched[s].schedule_type, "pump") == 0)
                             {
-                                pump_set(state);
-                                dev_state.pump_on = state;
-                                state_save(STATE_PATH, &dev_state);
-                                pump_on = state;
-                                pump_off_at = (state && duration > 0) ? (now + duration) : 0;
+                                if (pump_init() == 0 && pump_set(state) == 0)
+                                {
+                                    dev_state.pump_on = state;
+                                    pump_on = state;
+                                    pump_off_at = (state && duration > 0) ? (now + duration) : 0;
+                                    printf("  -> Pump %s [schedule]\n", state ? "ON" : "OFF");
+                                    alert_type = "schedule_pump";
+                                    snprintf(alert_msg, sizeof(alert_msg), "Scheduled: Pump turned %s",
+                                             state ? "ON" : "OFF");
+                                    sched_applied = 1;
+                                }
+                                else
+                                    fprintf(stderr, "  [Schedule] pump: init or GPIO failed\n");
                             }
-                            else if (strcmp(sched[s].schedule_type, "ventilation") == 0 && fans_init() == 0)
+                            else if (strcmp(sched[s].schedule_type, "ventilation") == 0)
                             {
-                                fans_set_both(state ? (duty > 0 ? duty : FAN_MIN_DUTY_WHEN_ON) : 0);
-                                dev_state.fan_duty = state ? (duty > 0 ? duty : FAN_MIN_DUTY_WHEN_ON) : 0;
-                                state_save(STATE_PATH, &dev_state);
-                                ventilation_off_at = (state && duration > 0) ? (now + duration) : 0;
+                                int fan_duty_target = state ? (duty > 0 ? duty : FAN_MIN_DUTY_WHEN_ON) : 0;
+                                if (fans_init() == 0 && fans_set_both(fan_duty_target) == 0)
+                                {
+                                    dev_state.fan_duty = fan_duty_target;
+                                    ventilation_off_at = (state && duration > 0) ? (now + duration) : 0;
+                                    printf("  -> Ventilation %s [schedule] (duty=%d%%)\n",
+                                           state ? "ON" : "OFF", fan_duty_target);
+                                    alert_type = "schedule_ventilation";
+                                    if (state)
+                                        snprintf(alert_msg, sizeof(alert_msg),
+                                                 "Scheduled: Ventilation ON at %d%%",
+                                                 fan_duty_target);
+                                    else
+                                        snprintf(alert_msg, sizeof(alert_msg),
+                                                 "Scheduled: Ventilation OFF");
+                                    sched_applied = 1;
+                                }
+                                else
+                                    fprintf(stderr, "  [Schedule] ventilation: init or fans_set failed\n");
                             }
+
+                            if (sched_applied)
                             {
+                                state_save(STATE_PATH, &dev_state);
+                                if (supabase_update_actuator_state(&supabase_cfg,
+                                        dev_state.lights_on, dev_state.pump_on, dev_state.fan_duty,
+                                        -1, -1) != 0)
+                                    fprintf(stderr, "  [Schedule] actuator state upsert failed\n");
+
+                                /* At most one alert per schedule id per cooldown window */
+                                enum { SCHED_ALERT_COOLDOWN_SEC = 120 };
+                                time_t *last_alert_at = NULL;
+                                for (int a = 0; a < sched_alert_cd_n; a++)
+                                    if (strcmp(sched_alert_cd[a].id, sched[s].id) == 0)
+                                    {
+                                        last_alert_at = &sched_alert_cd[a].last_alert_at;
+                                        break;
+                                    }
+                                if (!last_alert_at && sched_alert_cd_n < 32)
+                                {
+                                    int i = sched_alert_cd_n++;
+                                    snprintf(sched_alert_cd[i].id, sizeof(sched_alert_cd[i].id), "%s",
+                                             sched[s].id);
+                                    last_alert_at = &sched_alert_cd[i].last_alert_at;
+                                    *last_alert_at = 0;
+                                }
+                                if (last_alert_at && (now - *last_alert_at) >= SCHED_ALERT_COOLDOWN_SEC)
+                                {
+                                    if (supabase_insert_alert(&supabase_cfg, supabase_cfg.device_id,
+                                            alert_type, alert_msg, "low", "scheduled") == 0)
+                                        *last_alert_at = now;
+                                }
+
                                 int found = 0;
                                 for (int r = 0; r < run_cache_n; r++)
                                     if (strcmp(run_cache[r].id, sched[s].id) == 0)
@@ -985,7 +1080,8 @@ int main()
                                     }
                                 if (!found && run_cache_n < 16)
                                 {
-                                    snprintf(run_cache[run_cache_n].id, sizeof(run_cache[run_cache_n].id), "%s", sched[s].id);
+                                    snprintf(run_cache[run_cache_n].id, sizeof(run_cache[run_cache_n].id), "%s",
+                                             sched[s].id);
                                     run_cache[run_cache_n].last_run = now;
                                     run_cache_n++;
                                 }
