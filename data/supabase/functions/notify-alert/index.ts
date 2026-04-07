@@ -20,6 +20,14 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
+type IssueNotifyState = {
+  device_id: string;
+  issue_key: string;
+  notify_stage: number;
+  normal_emailed_at: string | null;
+  red_emailed_at: string | null;
+};
+
 type WebhookBody = {
   type?: string;
   table?: string;
@@ -67,6 +75,69 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function twilioConfigured(env: NotifyEnv): boolean {
   return !!(env.twilioSid && env.twilioToken && env.twilioFrom);
+}
+
+function issueKeyFromAlertType(alertType: string): string {
+  const k = (alertType ?? "").trim();
+  return k.length ? k : "alert";
+}
+
+async function getOrCreateIssueState(
+  admin: SupabaseClient,
+  deviceId: string,
+  issueKey: string,
+  firstAlertId?: string,
+): Promise<IssueNotifyState | null> {
+  const nowIso = new Date().toISOString();
+  const { error: upsertErr } = await admin
+    .from("alert_issue_notify_state")
+    .upsert(
+      {
+        device_id: deviceId,
+        issue_key: issueKey,
+        first_alert_id: firstAlertId ?? null,
+        last_alert_at: nowIso,
+      },
+      { onConflict: "device_id,issue_key" },
+    );
+  if (upsertErr) {
+    console.error("alert_issue_notify_state upsert", upsertErr);
+    return null;
+  }
+
+  const { data, error } = await admin
+    .from("alert_issue_notify_state")
+    .select("device_id, issue_key, notify_stage, normal_emailed_at, red_emailed_at")
+    .eq("device_id", deviceId)
+    .eq("issue_key", issueKey)
+    .maybeSingle();
+  if (error) {
+    console.error("alert_issue_notify_state select", error);
+    return null;
+  }
+  if (!data) return null;
+  return data as IssueNotifyState;
+}
+
+async function advanceIssueStageAfterSuccess(
+  admin: SupabaseClient,
+  deviceId: string,
+  issueKey: string,
+  stage: 1 | 2,
+): Promise<void> {
+  const patch: Record<string, unknown> = {
+    notify_stage: stage,
+    last_alert_at: new Date().toISOString(),
+  };
+  if (stage === 1) patch.normal_emailed_at = new Date().toISOString();
+  if (stage === 2) patch.red_emailed_at = new Date().toISOString();
+
+  const { error } = await admin
+    .from("alert_issue_notify_state")
+    .update(patch)
+    .eq("device_id", deviceId)
+    .eq("issue_key", issueKey);
+  if (error) console.error("alert_issue_notify_state update", error);
 }
 
 function shouldCompleteNotification(
@@ -292,19 +363,61 @@ async function processOneAlert(
     return { emailed: 0, smsed: 0, owners: 0, completed: false };
   }
 
+  const issueKey = issueKeyFromAlertType(alertType);
+  const issueState = await getOrCreateIssueState(admin, deviceId, issueKey, id);
+  const stage = issueState?.notify_stage ?? 0;
+
+  // Enforce: 1 normal + 1 red, then suppress until resolved.
+  // Suppressed alerts should still be marked notify_completed_at so backfill won't resend.
+  const suppressed = stage >= 2;
+  const escalated = stage === 1;
+
   const hadEmail = row.email_notified_at != null;
   const hadSms = row.sms_notified_at != null;
+
+  // If suppressed, skip outbound channels entirely for this alert row.
+  if (suppressed) {
+    const stats: NotifyStats = {
+      ownerCount: 0,
+      anyWantsEmail: false,
+      anyWantsSms: false,
+      emailed: 0,
+      smsed: 0,
+      emailTargets: 0,
+      smsTargets: 0,
+    };
+    const complete = await persistNotifyState(admin, id, stats, env, hadEmail, hadSms);
+    return { emailed: 0, smsed: 0, owners: 0, completed: complete };
+  }
+
+  const effectiveSeverity = escalated ? "critical" : severity;
+  const effectiveType = escalated ? `RED_${alertType}` : alertType;
+  const effectiveMessage = escalated
+    ? `RED ALERT (repeat issue):\n${message}`
+    : message;
 
   const stats = await sendNotificationsForAlert(
     admin,
     deviceId,
-    message,
-    severity,
-    alertType,
+    effectiveMessage,
+    effectiveSeverity,
+    effectiveType,
     env,
     hadEmail,
     hadSms,
   );
+
+  // Only advance stage when the email channel actually finished successfully for this run.
+  // (We intentionally do not advance on failure so retries can still notify.)
+  const emailJustFinished =
+    !hadEmail &&
+    stats.anyWantsEmail &&
+    stats.emailTargets > 0 &&
+    stats.emailed === stats.emailTargets;
+  if (emailJustFinished) {
+    const nextStage: 1 | 2 = escalated ? 2 : 1;
+    await advanceIssueStageAfterSuccess(admin, deviceId, issueKey, nextStage);
+  }
 
   const complete = await persistNotifyState(
     admin,
