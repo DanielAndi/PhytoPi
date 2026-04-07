@@ -13,6 +13,42 @@ Install on Arch Linux:
 sudo pacman -S libgpiod sqlite curl json-c
 ```
 
+## Sensor connections (ADS7830 / ADS7030)
+
+Wiring and code are aligned as follows. Connect sensors to the ADC and Pi as in this table:
+
+| Sensor / signal   | ADC channel | Connection (schematic)                                      | Code variable   | Pi / bus      |
+|-------------------|------------|-------------------------------------------------------------|-----------------|---------------|
+| **Light (LDR03)** | **CH0**    | LDR03+R2 voltage divider → Soil_Moisture connector **'S'** → CH0 | `light_level`   | I2C (SDA1/SCL1) |
+| **Soil moisture** | **CH1**    | Soil moisture probe signal → CH1                           | `soil_moisture` | I2C (SDA1/SCL1) |
+| **Water level**   | **CH2**    | Water level sensor signal → CH2                             | `water_level`   | I2C (SDA1/SCL1) |
+| **DHT11** (temp/humidity) | —   | Direct to GPIO (no ADC)                                     | `temperature`, `humidity` | GPIO 21   |
+
+- **ADC (U2):** VDD → 3.3 V, GND → GND, SDA → SDA1 (J1), SCL → SCL1 (J1). A0, A1 to GND set I2C address (e.g. 0x48 for ADS7030; code uses 0x4b for ADS7830—change in `lib/gpio.h` if needed).
+
+### Light sensor (LDR) cabling — do not connect A0 to VCC
+
+The ADC measures **voltage**. A0 must see a voltage that **changes with light**. If A0 is wired straight to 3.3 V (VCC), the reading is always max and does not change.
+
+**Correct setup (voltage divider):**
+
+1. **Remove** any wire that goes from **A0 directly to VCC**. That forces a constant high reading.
+2. Build a **voltage divider** with the LDR and a fixed resistor (e.g. 10 kΩ):
+   - **LDR (e.g. LDR03):** one leg → **3.3 V (VCC)**; other leg → **middle node** (the “signal”).
+   - **R2 (fixed resistor, e.g. 10 kΩ):** one leg → **middle node**; other leg → **GND**.
+3. **A0** → connect **only** to the **middle node** (where LDR and R2 meet). That node’s voltage goes up in light and down in dark; A0 reads that.
+
+```
+    3.3 V (VCC) ---- LDR ----+---- R2 ---- GND
+                             |
+                            A0 (ADC input)
+```
+
+- In **light:** LDR resistance is low → middle node voltage is higher → higher ADC value.
+- In **dark:** LDR resistance is high → middle node voltage is lower → lower ADC value.
+
+**Summary:** A0 = middle of the LDR–R2 divider only. Do **not** connect A0 to VCC or GND.
+
 ## Execution
 
 Run 'make clean' first for a fresh compilation.

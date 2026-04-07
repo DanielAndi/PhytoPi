@@ -260,9 +260,10 @@ int main()
 
     while (1)
     {
-        soil_moisture = (fd >= 0) ? read_ads7830_channel(fd, 0) : -1;  // Read soil moisture from A0
-        water_level = (fd >= 0) ? read_ads7830_channel(fd, 2) : -1;    // Read water level from A2
-        light_level = (fd >= 0) ? read_ads7830_channel(fd, 1) : -1;    // Read light level from A1
+        // ADC channels per schematic: LDR03 (light) on CH0, soil on CH1, water on CH2
+        light_level = (fd >= 0) ? read_ads7830_channel(fd, 0) : -1;   // LDR03 on CH0 (voltage divider → Soil_Moisture 'S' → CH0)
+        soil_moisture = (fd >= 0) ? read_ads7830_channel(fd, 1) : -1;  // Soil moisture from CH1
+        water_level = (fd >= 0) ? read_ads7830_channel(fd, 2) : -1;   // Water level from CH2
         
         // DHT11 needs at least 2-3 seconds between reads for reliability
         // Also add retry logic for more reliability
