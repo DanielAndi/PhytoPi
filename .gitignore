@@ -1,0 +1,10 @@
+# Keep the repo clean: ignore local archives and env backups
+
+# Local safety archives created during re-orgs
+PhytoPi/_project_root_archive/
+
+# Common env files (examples like *.example should still be committed)
+.env
+.env.*
+**/.env.backup
+
