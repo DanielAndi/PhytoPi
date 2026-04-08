@@ -126,6 +126,8 @@ class LandingPageScreen extends StatelessWidget {
                 const _CurrentDesignGrid(),
                 const SizedBox(height: 28),
                 _FooterCard(isAuthenticated: isAuthenticated),
+                const SizedBox(height: 20),
+                const _AuthorsCard(),
               ],
             ),
           ),
@@ -915,6 +917,130 @@ class _FooterCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _AuthorsCard extends StatelessWidget {
+  const _AuthorsCard();
+
+  static const _authors = <_Author>[
+    _Author(
+      name: 'Daniel G',
+      role: 'Project lead',
+      contact: 'danielg@example.com',
+      contactIcon: Icons.alternate_email,
+    ),
+    _Author(
+      name: 'Nolan Tuttle',
+      role: 'Developer',
+      contact: 'nolantuttle@gmail.com',
+      contactIcon: Icons.email_outlined,
+    ),
+    _Author(
+      name: 'Daniel Grijalva',
+      role: 'Developer',
+      contact: 'danielgrijalva374@gmail.com',
+      contactIcon: Icons.email_outlined,
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DashboardCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Authors',
+            style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Contacts for project coordination and maintenance.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.textTheme.bodyMedium?.color?.withOpacity(0.85),
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 14),
+          _AdaptiveGrid(
+            minItemWidth: 280,
+            children: _authors.map((a) => _AuthorMiniCard(author: a)).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AuthorMiniCard extends StatelessWidget {
+  final _Author author;
+  const _AuthorMiniCard({required this.author});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DashboardCard(
+      accentColor: theme.colorScheme.secondary,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            author.name,
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(Icons.badge_outlined, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  author.role,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.textTheme.bodyMedium?.color?.withOpacity(0.85),
+                    height: 1.25,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(author.contactIcon, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: SelectableText(
+                  author.contact,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.textTheme.bodyMedium?.color?.withOpacity(0.9),
+                    height: 1.25,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Author {
+  final String name;
+  final String role;
+  final String contact;
+  final IconData contactIcon;
+  const _Author({
+    required this.name,
+    required this.role,
+    required this.contact,
+    required this.contactIcon,
+  });
 }
 
 class _AdaptiveGrid extends StatelessWidget {
