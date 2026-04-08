@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/config/supabase_config.dart';
 import '../providers/device_provider.dart';
@@ -29,22 +30,78 @@ class _LiveStreamSectionState extends State<_LiveStreamSection> {
   bool _loading = true;
   bool _disconnected = false;
   String _streamUrl = '';
+  String _baseUrl = AppConfig.streamUrl;
+
+  static const String _prefsKeyStreamUrlOverride = 'phytopi.streamUrlOverride';
 
   @override
   void initState() {
     super.initState();
-    _start();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final override = prefs.getString(_prefsKeyStreamUrlOverride);
+      if (override != null && override.trim().isNotEmpty) {
+        _baseUrl = override.trim();
+      }
+    } catch (_) {
+      // If prefs fail (rare), just fall back to compile-time default.
+    }
+    if (mounted) _start();
   }
 
   void _start() {
     setState(() {
       _loading = true;
       _disconnected = false;
-      _streamUrl = _bustCache(AppConfig.streamUrl);
+      _streamUrl = _bustCache(_baseUrl);
     });
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) setState(() => _loading = false);
     });
+  }
+
+  Future<void> _editStreamUrl() async {
+    final controller = TextEditingController(text: _baseUrl);
+    final next = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Stream URL'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: 'http://<pi-ip>:8000/stream.mjpg',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    final trimmed = next?.trim();
+    if (trimmed == null || trimmed.isEmpty) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefsKeyStreamUrlOverride, trimmed);
+    } catch (_) {
+      // Ignore persistence errors; still apply for this session.
+    }
+
+    if (!mounted) return;
+    setState(() => _baseUrl = trimmed);
+    _start();
   }
 
   String _bustCache(String base) {
@@ -62,6 +119,11 @@ class _LiveStreamSectionState extends State<_LiveStreamSection> {
           children: [
             Text('Live View', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
             const Spacer(),
+            IconButton(
+              onPressed: _editStreamUrl,
+              tooltip: 'Edit stream URL',
+              icon: const Icon(Icons.link, size: 18),
+            ),
             TextButton.icon(
               onPressed: _start,
               icon: const Icon(Icons.refresh, size: 16),

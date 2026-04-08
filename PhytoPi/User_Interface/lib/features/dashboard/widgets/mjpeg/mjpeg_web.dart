@@ -2,6 +2,8 @@ import 'dart:html' as html;
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
 
+final Set<String> _registeredViewFactories = <String>{};
+
 Widget buildMjpegView(String url, BoxFit fit) {
   // Unique ID for this view based on URL to allow multiple cameras if needed
   // but unique enough to re-register if URL changes? 
@@ -14,16 +16,19 @@ Widget buildMjpegView(String url, BoxFit fit) {
   
   // Using ignore for undefined_prefixed_name because platformViewRegistry is not in standard dart:ui
   // ignore: undefined_prefixed_name
-  ui_web.platformViewRegistry.registerViewFactory(viewId, (int viewId) {
-    final element = html.ImageElement()
-      ..src = url
-      ..style.width = '100%'
-      ..style.height = '100%'
-      ..style.objectFit = _getObjectFit(fit)
-      ..style.border = 'none'; // Remove border
-      
-    return element;
-  });
+  if (!_registeredViewFactories.contains(viewId)) {
+    ui_web.platformViewRegistry.registerViewFactory(viewId, (int _) {
+      final element = html.ImageElement()
+        ..src = url
+        ..style.width = '100%'
+        ..style.height = '100%'
+        ..style.objectFit = _getObjectFit(fit)
+        ..style.border = 'none'; // Remove border
+
+      return element;
+    });
+    _registeredViewFactories.add(viewId);
+  }
 
   return HtmlElementView(viewType: viewId);
 }
