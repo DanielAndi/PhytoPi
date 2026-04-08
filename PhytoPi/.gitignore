@@ -49,7 +49,13 @@ bin/
 # SQLite database files
 *.db
 sensor_data.db
+
+# Flutter (and other) build outputs
+# Keep ignoring generated outputs, but do not ignore our build scripts under
+# `PhytoPi/User_Interface/scripts/build/`.
 build/
+!User_Interface/scripts/build/
+User_Interface/build/
 
 # OrcaSlicer Files
 *.3mf
