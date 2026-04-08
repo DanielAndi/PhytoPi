@@ -117,7 +117,9 @@ class AuthProvider extends ChangeNotifier {
       if (kIsWeb) {
         await SupabaseConfig.client?.auth.signInWithOAuth(
           provider,
-          redirectTo: null,
+          // On web, always redirect back to the currently-hosted origin (prod/staging/local).
+          // This prevents falling back to Supabase Auth "Site URL" (which is often localhost in dev).
+          redirectTo: Uri.base.origin,
         );
         return;
       }
