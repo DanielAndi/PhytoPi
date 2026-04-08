@@ -1,19 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'package:phytopi_dashboard/main.dart';
 import 'package:phytopi_dashboard/features/auth/providers/auth_provider.dart';
+import 'package:phytopi_dashboard/features/dashboard/providers/device_provider.dart';
+import 'package:phytopi_dashboard/features/dashboard/screens/dashboard_screen.dart';
 
 void main() {
   group('PhytoPi Dashboard Tests', () {
-    testWidgets('Dashboard displays welcome message', (WidgetTester tester) async {
-      // Build our app and trigger a frame.
+    testWidgets('Dashboard renders', (WidgetTester tester) async {
       await tester.pumpWidget(
         MultiProvider(
           providers: [
             ChangeNotifierProvider(create: (_) => AuthProvider()),
+            ChangeNotifierProvider(create: (_) => DeviceProvider()),
           ],
           child: MaterialApp(
             home: const DashboardScreen(),
@@ -21,17 +21,16 @@ void main() {
         ),
       );
 
-      // Verify that the welcome message is displayed
-      expect(find.text('Welcome to PhytoPi Dashboard'), findsOneWidget);
-      expect(find.text('Your IoT Plant Monitoring System'), findsOneWidget);
-      expect(find.text('🌱 Hello World! Dashboard is ready! 🌱'), findsOneWidget);
+      // Smoke check: app bar title should exist.
+      expect(find.textContaining('PhytoPi'), findsWidgets);
     });
 
-    testWidgets('Floating action button works', (WidgetTester tester) async {
+    testWidgets('Navigation menu opens from FAB', (WidgetTester tester) async {
       await tester.pumpWidget(
         MultiProvider(
           providers: [
             ChangeNotifierProvider(create: (_) => AuthProvider()),
+            ChangeNotifierProvider(create: (_) => DeviceProvider()),
           ],
           child: MaterialApp(
             home: const DashboardScreen(),
@@ -39,12 +38,10 @@ void main() {
         ),
       );
 
-      // Find and tap the floating action button
       await tester.tap(find.byType(FloatingActionButton));
-      await tester.pump();
+      await tester.pumpAndSettle();
 
-      // Verify that a snackbar appears
-      expect(find.text('Dashboard is working! 🎉'), findsOneWidget);
+      expect(find.text('Landing page'), findsOneWidget);
     });
   });
 }

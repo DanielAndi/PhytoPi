@@ -8,7 +8,9 @@ import '../models/device_model.dart';
 import '../models/sensor_model.dart';
 
 class DeviceProvider extends ChangeNotifier {
-  static const int _maxHistoryPoints = 10000; // Store up to ~1 week of minute-by-minute data
+  // Keep history bounded to reduce reload latency and client-side work on web.
+  // (A larger, time-windowed history can be loaded on-demand later if needed.)
+  static const int _maxHistoryPoints = 2000;
 
   /// Legacy rows may store raw ADC (0–255); map to % using same scale as firmware (SOIL_ADC_MAX=150).
   static double _normalizeSoilMoisture(double v) {
@@ -401,11 +403,14 @@ class DeviceProvider extends ChangeNotifier {
         await _fetchInitialHistory();
         _subscribeToReadings();
       }
-      await _fetchAlerts(deviceId);
+      // These loads are independent; fetch in parallel to reduce time-to-ready on reload.
+      await Future.wait([
+        _fetchAlerts(deviceId),
+        _fetchThresholds(deviceId),
+        _fetchSchedules(deviceId),
+        _fetchActuatorState(deviceId),
+      ]);
       _subscribeToAlerts(deviceId);
-      await _fetchThresholds(deviceId);
-      await _fetchSchedules(deviceId);
-      await _fetchActuatorState(deviceId);
       _subscribeToActuatorState(deviceId);
 
     } catch (e) {
@@ -419,51 +424,83 @@ class DeviceProvider extends ChangeNotifier {
 
   Future<void> _fetchInitialHistory() async {
     try {
-      // For each sensor, fetch initial history (up to limit)
-      for (final sensor in _sensors) {
-        if (sensor.sensorType == null) continue;
-        
+      final sensorsWithType = _sensors.where((s) => s.sensorType != null).toList();
+      if (sensorsWithType.isEmpty) return;
+
+      // Fetch per-sensor histories concurrently to reduce total reload time.
+      // (Still N queries, but no longer strictly serial.)
+      await Future.wait(sensorsWithType.map((sensor) async {
         final typeKey = sensor.sensorType!.key;
-        
+
         final response = await SupabaseConfig.client!
             .from(SupabaseConfig.readingsTable)
             .select('value, ts')
             .eq('sensor_id', sensor.id)
             .order('ts', ascending: false)
             .limit(_maxHistoryPoints);
-            
-        final data = response as List<dynamic>;
-        if (data.isNotEmpty) {
-          // Update latest reading from the most recent one
-          final latest = data.first;
-          var latestVal = (latest['value'] as num).toDouble();
-          if (typeKey == 'soil_moisture') {
-            latestVal = _normalizeSoilMoisture(latestVal);
-          }
-          _latestReadings[typeKey] = latestVal;
-          _lastUpdate = DateTime.parse(latest['ts']); // This will be roughly the last update
-          
-          // Build history (reversed because we fetched descending)
-          final points = data.map((r) {
-             var val = (r['value'] as num).toDouble();
-             if (typeKey == 'soil_moisture') {
-               val = _normalizeSoilMoisture(val);
-             }
-             final ts = DateTime.parse(r['ts']).millisecondsSinceEpoch.toDouble();
-             return FlSpot(ts, val);
-          }).toList();
 
-          // Ensure points are sorted by X (time) to prevent chart loops
-          points.sort((a, b) => a.x.compareTo(b.x));
-          
-          _historicalReadings[typeKey] = points;
-          
-          _hasReadings = true;
+        final data = response as List<dynamic>;
+        if (data.isEmpty) return;
+
+        // Update latest reading from the most recent one
+        final latest = data.first as Map;
+        var latestVal = (latest['value'] as num).toDouble();
+        if (typeKey == 'soil_moisture') {
+          latestVal = _normalizeSoilMoisture(latestVal);
         }
-      }
+        _latestReadings[typeKey] = latestVal;
+
+        final latestTs = DateTime.tryParse(latest['ts']?.toString() ?? '');
+        if (latestTs != null) {
+          if (_lastUpdate == null || latestTs.isAfter(_lastUpdate!)) {
+            _lastUpdate = latestTs;
+          }
+        }
+
+        final points = data.map((r) {
+          final row = r as Map;
+          var val = (row['value'] as num).toDouble();
+          if (typeKey == 'soil_moisture') {
+            val = _normalizeSoilMoisture(val);
+          }
+          final ts = DateTime.parse(row['ts'].toString()).millisecondsSinceEpoch.toDouble();
+          return FlSpot(ts, val);
+        }).toList();
+
+        // Ensure points are sorted by X (time) to prevent chart loops
+        points.sort((a, b) => a.x.compareTo(b.x));
+
+        _historicalReadings[typeKey] = points;
+        _hasReadings = true;
+      }));
     } catch (e) {
       debugPrint('DeviceProvider: Error fetching history: $e');
     }
+  }
+
+  static void _insertSortedByX(List<FlSpot> points, FlSpot point) {
+    if (points.isEmpty) {
+      points.add(point);
+      return;
+    }
+    final lastX = points.last.x;
+    if (point.x >= lastX) {
+      points.add(point);
+      return;
+    }
+
+    // Binary search insertion point to keep list sorted ascending by X.
+    var lo = 0;
+    var hi = points.length;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (points[mid].x <= point.x) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    points.insert(lo, point);
   }
 
   void _subscribeToReadings() {
@@ -530,15 +567,9 @@ class DeviceProvider extends ChangeNotifier {
       final currentHistory = _historicalReadings[typeKey] ?? [];
       final newTimestamp = ts.millisecondsSinceEpoch.toDouble();
       
-      // Add new point
-      currentHistory.add(FlSpot(newTimestamp, displayValue));
-      
-      // Keep only last N points, but after sorting to ensure we keep the newest ones
-      // Sort by X (time) to prevent chart loops
-      currentHistory.sort((a, b) => a.x.compareTo(b.x));
+      _insertSortedByX(currentHistory, FlSpot(newTimestamp, displayValue));
       
       if (currentHistory.length > _maxHistoryPoints) {
-        // Remove oldest points (first ones after sort)
         final excess = currentHistory.length - _maxHistoryPoints;
         currentHistory.removeRange(0, excess);
       }
