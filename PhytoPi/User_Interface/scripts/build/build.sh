@@ -20,20 +20,16 @@ FLUTTER_VERSION_FILE="$FLUTTER_CACHE_DIR/.flutter-version"
 
 FLUTTER_CHANNEL="${FLUTTER_CHANNEL:-stable}"
 
-# Prefer the official "latest stable" alias for Linux.
-# This avoids parsing JSON metadata during the build, which can fail in CI due
-# to transient network/pipe issues.
-if [[ "$FLUTTER_CHANNEL" == "stable" ]]; then
-  FLUTTER_TARBALL_URL="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_stable.tar.xz"
-else
-  FLUTTER_RELEASES_JSON_URL="https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json"
+# Resolve from Google's metadata (robust + matches actual published archives).
+# Note: There is no stable "alias" tarball URL; stable archives are versioned.
+FLUTTER_RELEASES_JSON_URL="https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json"
 
-  resolve_flutter_tarball_url() {
-    local channel="$1"
-    local tmp_json
-    tmp_json="$(mktemp)"
-    curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 10 "$FLUTTER_RELEASES_JSON_URL" -o "$tmp_json"
-    python3 - "$channel" "$tmp_json" <<'PY'
+resolve_flutter_tarball_url() {
+  local channel="$1"
+  local tmp_json
+  tmp_json="$(mktemp)"
+  curl -fsSL --retry 5 --retry-delay 1 --connect-timeout 10 "$FLUTTER_RELEASES_JSON_URL" -o "$tmp_json"
+  python3 - "$channel" "$tmp_json" <<'PY'
 import json, sys
 
 channel = sys.argv[1]
@@ -57,11 +53,10 @@ if not archive:
 
 print(f"{base_url}/{archive}")
 PY
-    rm -f "$tmp_json"
-  }
+  rm -f "$tmp_json"
+}
 
-  FLUTTER_TARBALL_URL="$(resolve_flutter_tarball_url "$FLUTTER_CHANNEL")"
-fi
+FLUTTER_TARBALL_URL="$(resolve_flutter_tarball_url "$FLUTTER_CHANNEL")"
 
 mkdir -p "$FLUTTER_CACHE_DIR"
 
