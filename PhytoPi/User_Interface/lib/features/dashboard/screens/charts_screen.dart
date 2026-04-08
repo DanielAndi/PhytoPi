@@ -25,6 +25,39 @@ class _ChartsScreenState extends State<ChartsScreen> {
     'All': 0, // Special case for all available data
   };
 
+  static int _hzToState(int hz) {
+    if (hz < 35) return 0;
+    if (hz < 83) return 1;
+    if (hz < 158) return 2;
+    if (hz < 308) return 3;
+    return 4;
+  }
+
+  /// Water level data can be:
+  /// - legacy percent: 0-100
+  /// - demo / derived state: 0-4
+  /// - raw photoelectric frequency: ~20-400 Hz
+  ///
+  /// Normalize everything to 0-100% for charting.
+  static List<FlSpot> _normalizeWaterSeriesToPercent(List<FlSpot> points) {
+    if (points.isEmpty) return points;
+    final maxY = points.map((p) => p.y).reduce((a, b) => a > b ? a : b);
+
+    // Already percent-ish (0-100)
+    if (maxY > 4 && maxY <= 100) return points;
+
+    // 0-4 state -> percent
+    if (maxY <= 4) {
+      return points.map((p) => FlSpot(p.x, (p.y * 25.0).clamp(0.0, 100.0))).toList();
+    }
+
+    // Raw Hz -> state -> percent
+    return points.map((p) {
+      final state = _hzToState(p.y.round());
+      return FlSpot(p.x, state * 25.0);
+    }).toList();
+  }
+
   List<FlSpot> _filterDataByTimeFrame(List<FlSpot> data) {
     if (data.isEmpty) return [];
     if (_selectedTimeFrame == 'All') return data;
@@ -52,7 +85,8 @@ class _ChartsScreenState extends State<ChartsScreen> {
         final waterSeries = rawPercentWater.isNotEmpty
             ? rawPercentWater
             : (historicalReadings['water_level_frequency'] ?? []);
-        final waterPoints = _filterDataByTimeFrame(waterSeries);
+        final waterPoints =
+            _normalizeWaterSeriesToPercent(_filterDataByTimeFrame(waterSeries));
         final pressurePoints = _filterDataByTimeFrame(historicalReadings['pressure'] ?? []);
         final gasPoints = _filterDataByTimeFrame(historicalReadings['gas_resistance'] ?? []);
         final gasY = gasResistanceAxisBounds(gasPoints);

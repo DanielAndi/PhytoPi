@@ -668,9 +668,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final humidityPoints = historicalReadings['humidity'] ?? [];
         final soilPoints = historicalReadings['soil_moisture'] ?? [];
         final percentWaterPoints = historicalReadings['water_level'] ?? [];
-        final waterPoints = percentWaterPoints.isNotEmpty
+        final waterSeries = percentWaterPoints.isNotEmpty
             ? percentWaterPoints
             : (historicalReadings['water_level_frequency'] ?? []);
+        final waterPoints = _normalizeWaterSeriesToPercent(waterSeries);
 
         return SingleChildScrollView(
           controller: _webScrollController, // Shared controller for simplicity
@@ -959,6 +960,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       }
     );
+  }
+
+  static int _hzToState(int hz) {
+    if (hz < 35) return 0;
+    if (hz < 83) return 1;
+    if (hz < 158) return 2;
+    if (hz < 308) return 3;
+    return 4;
+  }
+
+  /// See `ChartsScreen._normalizeWaterSeriesToPercent` for rationale.
+  static List<FlSpot> _normalizeWaterSeriesToPercent(List<FlSpot> points) {
+    if (points.isEmpty) return points;
+    final maxY = points.map((p) => p.y).reduce((a, b) => a > b ? a : b);
+    if (maxY > 4 && maxY <= 100) return points;
+    if (maxY <= 4) {
+      return points
+          .map((p) => FlSpot(p.x, (p.y * 25.0).clamp(0.0, 100.0)))
+          .toList();
+    }
+    return points.map((p) {
+      final state = _hzToState(p.y.round());
+      return FlSpot(p.x, state * 25.0);
+    }).toList();
   }
 }
 
