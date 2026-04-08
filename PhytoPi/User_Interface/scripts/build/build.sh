@@ -18,8 +18,39 @@ VERCEL_CACHE_DIR="${VERCEL_CACHE_DIR:-.vercel/cache}"
 FLUTTER_CACHE_DIR="$VERCEL_CACHE_DIR/flutter"
 FLUTTER_VERSION_FILE="$FLUTTER_CACHE_DIR/.flutter-version"
 
-FLUTTER_VERSION="${FLUTTER_VERSION:-stable}"
-FLUTTER_TARBALL_URL="https://storage.googleapis.com/flutter_infra_release/releases/${FLUTTER_VERSION}/linux/flutter_linux_3.22.3-stable.tar.xz"
+FLUTTER_CHANNEL="${FLUTTER_CHANNEL:-stable}"
+FLUTTER_RELEASES_JSON_URL="https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json"
+
+resolve_flutter_tarball_url() {
+  local channel="$1"
+
+  # Resolve the latest release for the requested channel from Google's metadata.
+  # This prevents pinning an outdated Flutter (and Dart) version on Vercel.
+  curl -fsSL "$FLUTTER_RELEASES_JSON_URL" | python3 - "$channel" <<'PY'
+import json, sys
+
+channel = sys.argv[1]
+data = json.load(sys.stdin)
+
+base_url = data.get("base_url")
+current = data.get("current_release", {}).get(channel)
+if not base_url or not current:
+    raise SystemExit(f"Could not resolve Flutter {channel} release from metadata")
+
+archive = None
+for rel in data.get("releases", []):
+    if rel.get("hash") == current:
+        archive = rel.get("archive")
+        break
+
+if not archive:
+    raise SystemExit(f"Could not find archive for Flutter {channel} hash {current}")
+
+print(f"{base_url}/{archive}")
+PY
+}
+
+FLUTTER_TARBALL_URL="$(resolve_flutter_tarball_url "$FLUTTER_CHANNEL")"
 
 mkdir -p "$FLUTTER_CACHE_DIR"
 
