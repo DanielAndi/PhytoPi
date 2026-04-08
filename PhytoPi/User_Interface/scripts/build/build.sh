@@ -55,7 +55,11 @@ export GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/tmp/gitconfig}"
 export GIT_CONFIG_SYSTEM="${GIT_CONFIG_SYSTEM:-/dev/null}"
 touch "$GIT_CONFIG_GLOBAL"
 # Avoid relying on $HOME or git's idea of "global" when running as root.
-git config --file "$GIT_CONFIG_GLOBAL" --add safe.directory "$FLUTTER_CACHE_DIR/flutter" || true
+# Git compares safe.directory against the repo path it sees (often absolute).
+FLUTTER_SDK_DIR_REL="$FLUTTER_CACHE_DIR/flutter"
+FLUTTER_SDK_DIR_ABS="$(cd "$FLUTTER_SDK_DIR_REL" && pwd -P)"
+git config --file "$GIT_CONFIG_GLOBAL" --add safe.directory "$FLUTTER_SDK_DIR_REL" || true
+git config --file "$GIT_CONFIG_GLOBAL" --add safe.directory "$FLUTTER_SDK_DIR_ABS" || true
 
 flutter --version
 flutter config --no-analytics >/dev/null
