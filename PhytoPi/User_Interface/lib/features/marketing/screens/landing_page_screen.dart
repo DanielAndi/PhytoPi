@@ -318,11 +318,22 @@ class _LandingImageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final effectiveOnTap = onTap ??
+        () {
+          showDialog<void>(
+            context: context,
+            barrierDismissible: true,
+            builder: (_) => _FullscreenImageDialog(
+              title: title,
+              assetPath: assetPath,
+            ),
+          );
+        };
     return DashboardCard(
       accentColor: accentColor,
       padding: const EdgeInsets.all(16),
       child: InkWell(
-        onTap: onTap,
+        onTap: effectiveOnTap,
         borderRadius: BorderRadius.circular(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -350,47 +361,46 @@ class _LandingImageCard extends StatelessWidget {
                           fit: imageFit,
                           filterQuality: FilterQuality.medium,
                         ),
-                        if (onTap != null)
-                          Align(
-                            alignment: Alignment.topRight,
-                            child: Padding(
-                              padding: const EdgeInsets.all(10),
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: theme.colorScheme.surface.withOpacity(
-                                    theme.brightness == Brightness.dark ? 0.6 : 0.75,
-                                  ),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: theme.dividerColor.withOpacity(0.25),
-                                  ),
+                        Align(
+                          alignment: Alignment.topRight,
+                          child: Padding(
+                            padding: const EdgeInsets.all(10),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.surface.withOpacity(
+                                  theme.brightness == Brightness.dark ? 0.6 : 0.75,
                                 ),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.open_in_full,
-                                        size: 16,
-                                        color: theme.colorScheme.onSurface,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: theme.dividerColor.withOpacity(0.25),
+                                ),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.open_in_full,
+                                      size: 16,
+                                      color: theme.colorScheme.onSurface,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'View',
+                                      style: theme.textTheme.labelMedium?.copyWith(
+                                        fontWeight: FontWeight.w700,
                                       ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'View',
-                                        style: theme.textTheme.labelMedium?.copyWith(
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
                           ),
+                        ),
                       ],
                     ),
                   ),
