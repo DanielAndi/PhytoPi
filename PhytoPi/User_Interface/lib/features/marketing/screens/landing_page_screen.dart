@@ -924,21 +924,15 @@ class _AuthorsCard extends StatelessWidget {
 
   static const _authors = <_Author>[
     _Author(
-      name: 'Daniel G',
-      role: 'Project lead',
-      contact: 'danielg@example.com',
-      contactIcon: Icons.alternate_email,
+      name: 'Daniel Grijalva',
+      role: 'Developer',
+      contact: 'danielgrijalva374@gmail.com',
+      contactIcon: Icons.email_outlined,
     ),
     _Author(
       name: 'Nolan Tuttle',
       role: 'Developer',
       contact: 'nolantuttle@gmail.com',
-      contactIcon: Icons.email_outlined,
-    ),
-    _Author(
-      name: 'Daniel Grijalva',
-      role: 'Developer',
-      contact: 'danielgrijalva374@gmail.com',
       contactIcon: Icons.email_outlined,
     ),
   ];
