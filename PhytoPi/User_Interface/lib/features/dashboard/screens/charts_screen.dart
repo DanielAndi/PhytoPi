@@ -48,7 +48,11 @@ class _ChartsScreenState extends State<ChartsScreen> {
         final tempPoints = _filterDataByTimeFrame(historicalReadings['temp_c'] ?? []);
         final humidityPoints = _filterDataByTimeFrame(historicalReadings['humidity'] ?? []);
         final soilPoints = _filterDataByTimeFrame(historicalReadings['soil_moisture'] ?? []);
-        final waterPoints = _filterDataByTimeFrame(historicalReadings['water_level_frequency'] ?? historicalReadings['water_level'] ?? []);
+        final rawPercentWater = historicalReadings['water_level'] ?? [];
+        final waterSeries = rawPercentWater.isNotEmpty
+            ? rawPercentWater
+            : (historicalReadings['water_level_frequency'] ?? []);
+        final waterPoints = _filterDataByTimeFrame(waterSeries);
         final pressurePoints = _filterDataByTimeFrame(historicalReadings['pressure'] ?? []);
         final gasPoints = _filterDataByTimeFrame(historicalReadings['gas_resistance'] ?? []);
         final gasY = gasResistanceAxisBounds(gasPoints);
@@ -179,8 +183,8 @@ class _ChartsScreenState extends State<ChartsScreen> {
                       title: 'Water Level',
                       dataPoints: waterPoints,
                       minY: 0,
-                      maxY: (historicalReadings['water_level_frequency']?.isNotEmpty ?? false) ? 4 : 100,
-                      unit: (historicalReadings['water_level_frequency']?.isNotEmpty ?? false) ? 'level' : '%',
+                      maxY: 100,
+                      unit: '%',
                       color: Colors.cyan,
                     ),
                   ),

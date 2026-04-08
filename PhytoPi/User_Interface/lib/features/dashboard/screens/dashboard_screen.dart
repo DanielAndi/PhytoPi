@@ -7,6 +7,7 @@ import 'package:phytopi_dashboard/shared/controllers/smooth_scroll_controller.da
 import '../../../core/platform/platform_detector.dart';
 import '../../../core/config/app_config.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../marketing/screens/landing_page_screen.dart';
 import '../providers/device_provider.dart';
 import 'charts_screen.dart';
 import 'alerts_screen.dart';
@@ -110,6 +111,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _NavItem(icon: Icons.person_outline, activeIcon: Icons.person, label: 'Profile'),
   ];
 
+  void _goToLanding(BuildContext context) {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => const LandingPageScreen(),
+      ),
+    );
+  }
+
   void _showNavMenu(BuildContext context, int currentIndex, void Function(int) onSelect) {
     final theme = Theme.of(context);
     showModalBottomSheet(
@@ -183,6 +192,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 },
               ),
               const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(Icons.home_outlined),
+                title: const Text('Landing page'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _goToLanding(context);
+                },
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
               Consumer<AuthProvider>(
                 builder: (context, authProvider, _) {
                   if (authProvider.user == null) return const SizedBox.shrink();
@@ -349,6 +367,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
             },
           ),
+          ListTile(
+            leading: const Icon(Icons.home_outlined),
+            title: const Text('Landing page'),
+            onTap: () {
+              Navigator.pop(context);
+              _goToLanding(context);
+            },
+          ),
            ListTile(
             leading: const Icon(Icons.settings),
             title: const Text('Settings'),
@@ -400,6 +426,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           },
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Landing page',
+            onPressed: () => _goToLanding(context),
+          ),
           // Claim Device moved to Devices tab
           const SizedBox(width: 16),
         ],
@@ -636,7 +667,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final tempPoints = historicalReadings['temp_c'] ?? [];
         final humidityPoints = historicalReadings['humidity'] ?? [];
         final soilPoints = historicalReadings['soil_moisture'] ?? [];
-        final waterPoints = historicalReadings['water_level_frequency'] ?? historicalReadings['water_level'] ?? [];
+        final percentWaterPoints = historicalReadings['water_level'] ?? [];
+        final waterPoints = percentWaterPoints.isNotEmpty
+            ? percentWaterPoints
+            : (historicalReadings['water_level_frequency'] ?? []);
 
         return SingleChildScrollView(
           controller: _webScrollController, // Shared controller for simplicity
@@ -882,8 +916,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 title: 'Water Level Trend',
                                 dataPoints: waterPoints,
                                 minY: 0,
-                                maxY: (historicalReadings['water_level_frequency']?.isNotEmpty ?? false) ? 4 : 100,
-                                unit: (historicalReadings['water_level_frequency']?.isNotEmpty ?? false) ? 'level' : '%',
+                                maxY: 100,
+                                unit: '%',
                                 color: Colors.cyan,
                               ),
                             ),
