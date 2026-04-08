@@ -19,18 +19,27 @@ FLUTTER_CACHE_DIR="$VERCEL_CACHE_DIR/flutter"
 FLUTTER_VERSION_FILE="$FLUTTER_CACHE_DIR/.flutter-version"
 
 FLUTTER_CHANNEL="${FLUTTER_CHANNEL:-stable}"
-FLUTTER_RELEASES_JSON_URL="https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json"
 
-resolve_flutter_tarball_url() {
-  local channel="$1"
+# Prefer the official "latest stable" alias for Linux.
+# This avoids parsing JSON metadata during the build, which can fail in CI due
+# to transient network/pipe issues.
+if [[ "$FLUTTER_CHANNEL" == "stable" ]]; then
+  FLUTTER_TARBALL_URL="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_stable.tar.xz"
+else
+  FLUTTER_RELEASES_JSON_URL="https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json"
 
-  # Resolve the latest release for the requested channel from Google's metadata.
-  # This prevents pinning an outdated Flutter (and Dart) version on Vercel.
-  curl -fsSL "$FLUTTER_RELEASES_JSON_URL" | python3 - "$channel" <<'PY'
+  resolve_flutter_tarball_url() {
+    local channel="$1"
+    local tmp_json
+    tmp_json="$(mktemp)"
+    curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 10 "$FLUTTER_RELEASES_JSON_URL" -o "$tmp_json"
+    python3 - "$channel" "$tmp_json" <<'PY'
 import json, sys
 
 channel = sys.argv[1]
-data = json.load(sys.stdin)
+path = sys.argv[2]
+with open(path, "r", encoding="utf-8") as f:
+    data = json.load(f)
 
 base_url = data.get("base_url")
 current = data.get("current_release", {}).get(channel)
@@ -48,9 +57,11 @@ if not archive:
 
 print(f"{base_url}/{archive}")
 PY
-}
+    rm -f "$tmp_json"
+  }
 
-FLUTTER_TARBALL_URL="$(resolve_flutter_tarball_url "$FLUTTER_CHANNEL")"
+  FLUTTER_TARBALL_URL="$(resolve_flutter_tarball_url "$FLUTTER_CHANNEL")"
+fi
 
 mkdir -p "$FLUTTER_CACHE_DIR"
 
