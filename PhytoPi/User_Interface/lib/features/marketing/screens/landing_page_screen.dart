@@ -121,6 +121,10 @@ class LandingPageScreen extends StatelessWidget {
                 const SizedBox(height: 12),
                 const _ArchitectureCard(),
                 const SizedBox(height: 28),
+                Text('Current design concept', style: theme.textTheme.titleLarge),
+                const SizedBox(height: 12),
+                const _CurrentDesignGrid(),
+                const SizedBox(height: 28),
                 _FooterCard(isAuthenticated: isAuthenticated),
               ],
             ),
@@ -241,20 +245,172 @@ class _HeroVisual extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      height: 220,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        color: theme.colorScheme.surfaceContainerHigh.withOpacity(
-          theme.brightness == Brightness.dark ? 0.35 : 1,
-        ),
-        border: Border.all(color: theme.dividerColor.withOpacity(0.25)),
+    return _LandingImageCard(
+      assetPath: 'assets/marketing/prototype_render.png',
+      title: 'Prototype render',
+      description:
+          'Current enclosure + frame concept used for sizing and layout decisions.',
+      accentColor: theme.colorScheme.primary,
+      imageFit: BoxFit.cover,
+    );
+  }
+}
+
+class _CurrentDesignGrid extends StatelessWidget {
+  const _CurrentDesignGrid();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final items = [
+      _LandingImageCard(
+        assetPath: 'assets/marketing/prototype_render.png',
+        title: 'Prototype render',
+        description:
+            'A render of the current enclosure + frame concept for the PhytoPi build.',
+        accentColor: theme.colorScheme.primary,
+        imageFit: BoxFit.cover,
       ),
-      child: Center(
-        child: Icon(
-          Icons.auto_graph_rounded,
-          size: 110,
-          color: theme.colorScheme.primary.withOpacity(0.9),
+      _LandingImageCard(
+        assetPath: 'assets/marketing/physical_prototype.png',
+        title: 'Physical prototype',
+        description:
+            'A real prototype used to validate packaging, stability, and display placement.',
+        accentColor: theme.colorScheme.secondary,
+        imageFit: BoxFit.cover,
+      ),
+      _LandingImageCard(
+        assetPath: 'assets/marketing/electrical_schematic.png',
+        title: 'Electrical schematic',
+        description:
+            'Wiring overview for the Raspberry Pi + sensors + actuators (pump/fan/lighting).',
+        accentColor: theme.colorScheme.tertiary,
+        imageFit: BoxFit.contain,
+      ),
+    ];
+
+    return _AdaptiveGrid(
+      minItemWidth: 320,
+      children: items,
+    );
+  }
+}
+
+class _LandingImageCard extends StatelessWidget {
+  final String assetPath;
+  final String title;
+  final String description;
+  final Color accentColor;
+  final BoxFit imageFit;
+  final VoidCallback? onTap;
+
+  const _LandingImageCard({
+    required this.assetPath,
+    required this.title,
+    required this.description,
+    required this.accentColor,
+    required this.imageFit,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DashboardCard(
+      accentColor: accentColor,
+      padding: const EdgeInsets.all(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: AspectRatio(
+                aspectRatio: 16 / 10,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHigh.withOpacity(
+                      theme.brightness == Brightness.dark ? 0.35 : 1,
+                    ),
+                    border: Border.all(color: theme.dividerColor.withOpacity(0.25)),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Semantics(
+                    label: title,
+                    image: true,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.asset(
+                          assetPath,
+                          fit: imageFit,
+                          filterQuality: FilterQuality.medium,
+                        ),
+                        if (onTap != null)
+                          Align(
+                            alignment: Alignment.topRight,
+                            child: Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.surface.withOpacity(
+                                    theme.brightness == Brightness.dark ? 0.6 : 0.75,
+                                  ),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: theme.dividerColor.withOpacity(0.25),
+                                  ),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.open_in_full,
+                                        size: 16,
+                                        color: theme.colorScheme.onSurface,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'View',
+                                        style: theme.textTheme.labelMedium?.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              description,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.textTheme.bodyMedium?.color?.withOpacity(0.85),
+                height: 1.35,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -279,9 +435,19 @@ class _MetricsGrid extends StatelessWidget {
         icon: Icons.speed,
       ),
       _MiniMetric(
-        title: '<\$250 hardware goal',
-        subtitle: 'Target unit hardware cost (prototype goal ~\$200)',
+        title: '\$557.88 hardware spent',
+        subtitle: 'Current prototype hardware spend (22 purchases logged)',
         icon: Icons.payments_outlined,
+      ),
+      _MiniMetric(
+        title: '≤\$250 optimized unit target',
+        subtitle: 'Projected per-unit BOM after consolidation + bulk sourcing',
+        icon: Icons.price_check_outlined,
+      ),
+      _MiniMetric(
+        title: 'Competitors: \$399–\$599',
+        subtitle: 'Vivosun smart tent kits (~\$399–\$410) vs VGrow (~\$599)',
+        icon: Icons.compare_arrows_outlined,
       ),
       _MiniMetric(
         title: '3+ health metrics',
@@ -460,21 +626,22 @@ class _ArchitectureCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Sensors → Edge compute → Cloud → Dashboard',
+            'Architecture: Edge → Cloud → Dashboard',
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w800,
             ),
           ),
           const SizedBox(height: 10),
           Text(
-            'Hardware (Raspberry Pi 5 + ESP32) gathers sensor and camera data, stores it, and drives actuators like a pump. '
-            'The Flutter dashboard provides fast visibility, configuration, and alerts.',
+            'PhytoPi is built as a split system: an on-device “edge” stack for sensing + actuation and a cloud backend for sync, history, and remote access.',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: theme.textTheme.bodyMedium?.color?.withOpacity(0.85),
               height: 1.4,
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
+          _ArchitectureBullets(),
+          const SizedBox(height: 16),
           Wrap(
             spacing: 10,
             runSpacing: 10,
@@ -487,7 +654,224 @@ class _ArchitectureCard extends StatelessWidget {
               _Pill(label: 'Supabase backend'),
             ],
           ),
+          const SizedBox(height: 18),
+          Text('Diagrams', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 10),
+          const _ArchitectureDiagramGrid(),
         ],
+      ),
+    );
+  }
+}
+
+class _ArchitectureBullets extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodyMedium?.color?.withOpacity(0.85);
+
+    Widget item(IconData icon, String title, String body) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: theme.colorScheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: theme.textTheme.bodyMedium?.copyWith(color: muted, height: 1.35),
+                children: [
+                  TextSpan(
+                    text: '$title: ',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: theme.textTheme.bodyMedium?.color,
+                    ),
+                  ),
+                  TextSpan(text: body),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        item(
+          Icons.memory_outlined,
+          'Edge layer',
+          'Raspberry Pi aggregates sensors + camera data and runs the local services needed for a kiosk-style UI and offline continuity.',
+        ),
+        const SizedBox(height: 10),
+        item(
+          Icons.sync_outlined,
+          'Data pipeline',
+          'Readings and images are staged locally, then synced to Supabase for history, remote dashboards, and analytics.',
+        ),
+        const SizedBox(height: 10),
+        item(
+          Icons.tune_outlined,
+          'Control plane',
+          'Automations (e.g., watering) are executed on-device for low latency and safety bounds; cloud config can adjust targets and schedules.',
+        ),
+      ],
+    );
+  }
+}
+
+class _ArchitectureDiagramGrid extends StatelessWidget {
+  const _ArchitectureDiagramGrid();
+
+  void _open(BuildContext context, _DiagramItem item) {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => _FullscreenImageDialog(
+        title: item.title,
+        assetPath: item.assetPath,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final items = [
+      _DiagramItem(
+        assetPath: 'assets/marketing/system_architecture.png',
+        title: 'System architecture',
+        description: 'High-level services across edge device, containers, and cloud.',
+        fit: BoxFit.contain,
+        color: theme.colorScheme.primary,
+      ),
+      _DiagramItem(
+        assetPath: 'assets/marketing/device_data_flow.png',
+        title: 'Device data flow',
+        description: 'How readings/images are captured, staged, and uploaded.',
+        fit: BoxFit.contain,
+        color: theme.colorScheme.secondary,
+      ),
+      _DiagramItem(
+        assetPath: 'assets/marketing/system_flowchart.png',
+        title: 'Firmware flow',
+        description: 'Sensor-read loop, validation, publish/ack, and command handling.',
+        fit: BoxFit.contain,
+        color: theme.colorScheme.tertiary,
+      ),
+      _DiagramItem(
+        assetPath: 'assets/marketing/uml_diagram.png',
+        title: 'Module UML',
+        description: 'Classes/modules and boundaries for device firmware components.',
+        fit: BoxFit.contain,
+        color: theme.colorScheme.primary,
+      ),
+      _DiagramItem(
+        assetPath: 'assets/marketing/dashboard_mock.png',
+        title: 'Dashboard concept',
+        description: 'Kiosk-style UI for live overview, alerts, and health scoring.',
+        fit: BoxFit.cover,
+        color: theme.colorScheme.secondary,
+      ),
+    ];
+
+    return _AdaptiveGrid(
+      minItemWidth: 320,
+      children: items
+          .map(
+            (d) => _LandingImageCard(
+              assetPath: d.assetPath,
+              title: d.title,
+              description: d.description,
+              accentColor: d.color,
+              imageFit: d.fit,
+              onTap: () => _open(context, d),
+            ),
+          )
+          .toList(),
+    );
+  }
+}
+
+class _DiagramItem {
+  final String assetPath;
+  final String title;
+  final String description;
+  final BoxFit fit;
+  final Color color;
+  const _DiagramItem({
+    required this.assetPath,
+    required this.title,
+    required this.description,
+    required this.fit,
+    required this.color,
+  });
+}
+
+class _FullscreenImageDialog extends StatelessWidget {
+  final String title;
+  final String assetPath;
+  const _FullscreenImageDialog({required this.title, required this.assetPath});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Dialog(
+      insetPadding: const EdgeInsets.all(16),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1100),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: ColoredBox(
+                    color: theme.colorScheme.surfaceContainerHigh.withOpacity(
+                      theme.brightness == Brightness.dark ? 0.35 : 1,
+                    ),
+                    child: InteractiveViewer(
+                      minScale: 0.7,
+                      maxScale: 6,
+                      child: Center(
+                        child: Image.asset(
+                          assetPath,
+                          fit: BoxFit.contain,
+                          filterQuality: FilterQuality.high,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
       ),
     );
   }
