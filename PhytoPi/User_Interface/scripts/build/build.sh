@@ -44,6 +44,17 @@ fi
 
 export PATH="$FLUTTER_CACHE_DIR/flutter/bin:$PATH"
 
+#
+# Vercel builds run in a containerized environment (often as root). Flutter's SDK
+# is a git repository, and git can refuse to operate if it considers the repo
+# ownership "dubious". Keep this build self-contained by writing to a temporary
+# global gitconfig for this build process and marking the Flutter SDK checkout as
+# safe.
+#
+export GIT_CONFIG_GLOBAL="${GIT_CONFIG_GLOBAL:-/tmp/gitconfig}"
+touch "$GIT_CONFIG_GLOBAL"
+git config --global --add safe.directory "$FLUTTER_CACHE_DIR/flutter" || true
+
 flutter --version
 flutter config --no-analytics >/dev/null
 flutter config --enable-web >/dev/null
